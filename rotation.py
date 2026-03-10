@@ -6,7 +6,7 @@ import random
 st.set_page_config(page_title="GM Manager Central", layout="wide")
 st.title("🕶️ GENTLE MONSTER 전사 통합 로테이션 (v23.0)")
 
-SHEET_ID = "여기에_실제_시트_ID_입력" 
+SHEET_ID = "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q" 
 SHEET_NAME = "Sheet1" 
 url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={SHEET_NAME}"
 
@@ -68,3 +68,4 @@ all_pt = extract_names(store_data, '파트타이머')
 
 # ... (이하 로테이션 생성 로직 v22.1과 동일)
 # [페이지 하단에 working_ft, working_pt 멀티셀렉트와 generate 버튼 코드를 유지해 주세요]
+
