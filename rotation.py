@@ -5,7 +5,7 @@ import re
 
 # 1. 페이지 설정
 st.set_page_config(page_title="GM Manager Central", layout="wide")
-st.title("🕶️ GENTLE MONSTER 전사 통합 로테이션 (v50.0)")
+st.title("🕶️ GENTLE MONSTER 전사 통합 로테이션 (v51.0)")
 
 # 💡 관리자님의 실제 시트 ID 입력
 SHEET_ID = "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q" 
@@ -24,7 +24,7 @@ def load_db():
 
 db_df = load_db()
 if db_df.empty:
-    st.error("❌ 시트 로드 실패 - ID 및 공유 설정을 확인하세요."); st.stop()
+    st.error("❌ 시트 로드 실패"); st.stop()
 
 db_df.rename(columns={db_df.columns[0]: '매장명'}, inplace=True)
 store_list = sorted([s for s in db_df['매장명'].unique() if s and str(s).lower() != 'none'])
@@ -64,11 +64,10 @@ group_labels = ["A", "B", "C", "D", "E"]
 all_time_slots = [f"{h}:00" for h in range(8, 23)]
 lunch_configs = {}; dinner_configs = {}
 
-with st.sidebar.expander("🍴 식사 조별 시간 설정 (중복 가능)"):
+with st.sidebar.expander("🍴 식사 조별 시간 설정"):
     for label in group_labels:
-        # ⭐ 모든 조의 점심/저녁 선택 범위를 8시~22시 전체로 통합
-        lunch_configs[label] = st.selectbox(f"점심 {label}조", all_time_slots, index=group_labels.index(label)+3, key=f"L_{label}")
-        dinner_configs[label] = st.selectbox(f"저녁 {label}조", all_time_slots, index=group_labels.index(label)+8, key=f"D_{label}")
+        lunch_configs[label] = st.selectbox(f"점심 {label}조", all_time_slots, index=all_time_slots.index("12:00"), key=f"L_{label}")
+        dinner_configs[label] = st.selectbox(f"저녁 {label}조", all_time_slots, index=all_time_slots.index("18:00"), key=f"D_{label}")
 
 ft_settings = {}
 for ft in working_ft:
@@ -87,13 +86,10 @@ pt_settings = {}
 for pt in working_pt:
     match = store_data[store_data[next(c for c in store_data.columns if '이름' in c)] == pt]
     r = match.iloc[0] if not match.empty else {}
-    try:
-        ps_v = int(float(r.get('출근시간', 10)))
-        pe_v = int(float(r.get('퇴근시간', 20)))
-        if pe_v <= ps_v: pe_v = ps_v + 1
-    except: ps_v, pe_v = 10, 20
-    pm_v = str(r.get('식사시간', '13:00'))
-
+    ps_v = int(float(r.get('출근시간', 10))) if r.get('출근시간') else 10
+    pe_v = int(float(r.get('퇴근시간', 20))) if r.get('퇴근시간') else 20
+    pm_v = str(r.get('식사시간', '13:00')) if r.get('식사시간') else '13:00'
+    
     with st.sidebar.expander(f"📌 {pt} (파트타이머)"):
         ps_t = st.number_input(f"{pt} 출근", 0, 23, ps_v, key=f"ps_{pt}")
         pe_t = st.number_input(f"{pt} 퇴근", 0, 23, pe_v, key=f"pe_{pt}")
@@ -102,8 +98,8 @@ for pt in working_pt:
         can_counter = st.checkbox(f"{pt} 카운터 가능", value=str(r.get('카운터여부','X')).upper() in ['O', 'Y'], key=f"pc_{pt}")
         pt_settings[pt] = {"start": ps_t, "end": pe_t, "meal": pm_t, "can_counter": can_counter}
 
-# 5. 로테이션 알고리즘
-def generate_v50():
+# 5. [수정] 로테이션 알고리즘 (파트타이머 가용성 체크 강화)
+def generate_v51():
     slots = [f"{h}:00" for h in range(8, 23)]
     names = working_ft + working_pt
     matrix = {n: {s: "-" for s in slots} for n in names}
@@ -111,28 +107,39 @@ def generate_v50():
 
     for s in slots:
         curr_h = int(s.split(":")[0])
+        # 가용 인원 선별 로직 수정
         ft_w = [f for f in working_ft if ft_settings[f]["start"] <= curr_h < ft_settings[f]["end"]]
         pt_w = [p for p in working_pt if pt_settings[p]["start"] <= curr_h < pt_settings[p]["end"]]
         
+        # 식사 중인 사람 먼저 표기
         for f in ft_w:
             if s in ft_settings[f]["meals"]: matrix[f][s] = "🍴식사"
         for p in pt_w:
             if s == pt_settings[p]["meal"]: matrix[p][s] = "🍴식사"
             
+        # 👑 진짜 배정 가능한 풀 (출근 중 & 식사 아님)
         pool = [m for m in (ft_w + pt_w) if matrix[m][s] == "-"]
         random.shuffle(pool)
         
+        # 구역별 배정
         for z in target_zones:
             max_to = zone_to_map[z]
             for _ in range(max_to):
                 if not pool: break
+                
+                # 2시간 연속 금지 후보
                 cands = [m for m in pool if last_z[m] != z]
                 choice = random.choice(cands if cands else pool)
+                
+                # 첫 구역(카운터) 숙련도 체크
                 if z == target_zones[0]:
-                    skilled = [m for m in (cands if cands else pool) if m in working_ft or pt_settings[m]["can_counter"]]
+                    skilled = [m for m in (cands if cands else pool) if m in working_ft or pt_settings.get(m, {}).get("can_counter", False)]
                     if skilled: choice = random.choice(skilled)
+                
                 matrix[choice][s] = z
-                pool.remove(choice); last_z[choice] = z
+                pool.remove(choice)
+                last_z[choice] = z
+        
         for m in pool: 
             matrix[m][s] = "📢지원"; last_z[m] = "📢지원"
 
@@ -151,9 +158,10 @@ def row_styles(row):
     return [''] * len(row)
 
 if st.sidebar.button("🚀 로테이션 생성"):
-    st.session_state.df_v50 = generate_v50()
+    st.session_state.df_v51 = generate_v51()
 
-if 'df_v50' in st.session_state:
+if 'df_v46' in st.session_state: del st.session_state['df_v46'] # 이전 세션 삭제
+if 'df_v51' in st.session_state:
     st.subheader(f"📊 {selected_store} 최종 스케줄")
-    styled_df = st.session_state.df_v50.style.apply(row_styles, axis=1).applymap(apply_styles)
+    styled_df = st.session_state.df_v51.style.apply(row_styles, axis=1).applymap(apply_styles)
     st.table(styled_df)
