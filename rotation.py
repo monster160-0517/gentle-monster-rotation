@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
 import random
+import re
 
 # 1. 페이지 설정 및 데이터 로드
 st.set_page_config(page_title="GM Manager Central", layout="wide")
-st.title("🕶️ GENTLE MONSTER 전사 통합 로테이션 (v23.0)")
+st.title("🕶️ GENTLE MONSTER 전사 통합 로테이션 (v26.0)")
 
-# 💡 여기에 관리자님의 실제 시트 ID를 넣으세요!
+# 💡 관리자님의 실제 시트 ID를 여기에 입력하세요!
 SHEET_ID = "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q" 
 SHEET_NAME = "Sheet1" 
 url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={SHEET_NAME}"
@@ -14,57 +15,48 @@ url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sh
 @st.cache_data(ttl=1)
 def load_db():
     try:
-        df = pd.read_csv(url)
+        df = pd.read_csv(url, skip_blank_lines=True)
         df.columns = [str(c).strip() for c in df.columns]
-        return df.apply(lambda x: x.astype(str).str.strip() if x.dtype == "object" else x)
+        df = df.astype(str).replace(['nan', 'None', 'nan.0'], None).apply(lambda x: x.str.strip() if hasattr(x, "str") else x)
+        return df
     except: return pd.DataFrame()
 
 db_df = load_db()
-
 if db_df.empty:
-    st.error("❌ 데이터를 가져오지 못했습니다. 1.공유설정 2.시트ID 3.탭이름을 확인하세요.")
-    st.stop()
+    st.error("❌ 시트 로드 실패"); st.stop()
 
-# 데이터 정제 및 이름 찾기 로직
-def get_clean_data(df):
-    df.rename(columns={df.columns[0]: '매장명'}, inplace=True)
-    df = df.replace('nan', None)
-    return df
-
-db_df = get_clean_data(db_df)
-
-# 2. 매장 및 구역 설정
-store_list = sorted(db_df['매장명'].unique())
+db_df.rename(columns={db_df.columns[0]: '매장명'}, inplace=True)
+store_list = sorted([s for s in db_df['매장명'].unique() if s and str(s).lower() != 'none'])
 selected_store = st.sidebar.selectbox("🏠 담당 매장 선택", store_list)
 store_data = db_df[db_df['매장명'] == selected_store].copy()
 
+# 2. 구역 및 TO 설정 (시트의 '운영구역' 열 데이터 활용)
 zone_col = '운영구역' if '운영구역' in store_data.columns else store_data.columns[-1]
-default_zones = str(store_data[zone_col].iloc[0]) if not store_data[zone_col].dropna().empty else "카운터, A, B, C"
-zone_input = st.sidebar.text_input("📍 운영 구역", default_zones)
-target_zones = [z.strip() for z in zone_input.split(",") if z.strip()]
+raw_zones = str(store_data[zone_col].iloc[0]) if not store_data[zone_col].dropna().empty else "카운터(1), A(1)"
+zone_input = st.sidebar.text_input("📍 운영 구역 및 TO", raw_zones)
 
-# 이름 추출 로직 (nan 방지)
-def extract_names(data, category):
+zone_to_map = {}
+for z_info in zone_input.split(","):
+    z_info = z_info.strip()
+    match = re.search(r"(.+)\((\d+)\)", z_info)
+    if match:
+        zone_to_map[match.group(1).strip()] = int(match.group(2))
+    else:
+        zone_to_map[z_info] = 1
+target_zones = list(zone_to_map.keys())
+
+# 3. 이름 추출 및 인원 선택
+def extract_names(data, keyword):
     type_col = '구분' if '구분' in data.columns else data.columns[2]
-    filtered = data[data[type_col].str.contains(category, na=False)]
-    names = []
-    for _, row in filtered.iterrows():
-        name = row.get('이름')
-        if not name or str(name).lower() in ['none', 'nan']:
-            potential_names = [str(v) for v in row.values if str(v) not in [selected_store, category, default_zones] and len(str(v)) > 1]
-            name = potential_names[0] if potential_names else "이름없음"
-        names.append(name)
-    return [n for n in names if str(n).lower() not in ['none', 'nan']]
+    name_col = '이름' if '이름' in data.columns else data.columns[1]
+    filtered = data[data[type_col].str.contains(keyword, na=False, case=False)]
+    return [n.replace('.0', '') if n.endswith('.0') else n for n in filtered[name_col].dropna().tolist() if n != 'None']
 
-all_ft = extract_names(store_data, '정직원')
-all_pt = extract_names(store_data, '파트타이머')
+all_ft = extract_names(store_data, '정직'); all_pt = extract_names(store_data, '파트')
+working_ft = st.sidebar.multiselect("✅ 오늘 정직원", all_ft, default=all_ft)
+working_pt = st.sidebar.multiselect("✅ 오늘 파트타이머", all_pt, default=all_pt)
 
-# 3. 출근 인원 선택
-st.sidebar.divider()
-working_ft = st.sidebar.multiselect("✅ 오늘 출근 정직원", all_ft, default=all_ft)
-working_pt = st.sidebar.multiselect("✅ 오늘 출근 파트타이머", all_pt, default=all_pt)
-
-# 4. 정직원 및 파트타이머 상세 설정
+# 4. 상세 시간 및 식사조 설정
 group_configs = {}
 num_groups = st.sidebar.select_slider("식사 조 개수", options=[2, 3, 4], value=2)
 group_labels = ["A", "B", "C", "D"][:num_groups]
@@ -83,15 +75,16 @@ for i, ft in enumerate(working_ft):
 
 pt_settings = {}
 for i, pt in enumerate(working_pt):
-    with st.sidebar.expander(f"📌 {pt} 시간 및 권한"):
-        ps_t = st.number_input(f"{pt} 출근", 10, 20, 10, key=f"{pt}_ps_{i}")
-        pe_t = st.number_input(f"{pt} 퇴근", 11, 21, 20, key=f"{pt}_pe_{i}")
-        pm_t = st.selectbox(f"{pt} 식사", [f"{h}:00" for h in range(ps_t+1, pe_t-1)], key=f"{pt}_pm_{i}")
-        can_counter = st.checkbox(f"{pt} 카운터 가능", value=False, key=f"{pt}_counter_{i}")
+    pt_row = store_data[store_data['이름'] == pt].iloc[0] if pt in store_data['이름'].values else {}
+    with st.sidebar.expander(f"📌 {pt} 설정"):
+        ps_t = st.number_input(f"{pt} 출근", 8, 20, int(pt_row.get('출근시간', 10)) if pt_row.get('출근시간') else 10, key=f"{pt}_ps_{i}")
+        pe_t = st.number_input(f"{pt} 퇴근", 10, 23, int(pt_row.get('퇴근시간', 20)) if pt_row.get('퇴근시간') else 20, key=f"{pt}_pe_{i}")
+        pm_t = st.selectbox(f"{pt} 식사", [f"{h}:00" for h in range(8, 23)], index=5, key=f"{pt}_pm_{i}")
+        can_counter = st.checkbox(f"{pt} 카운터 가능", value=str(pt_row.get('카운터여부', 'X')).upper() in ['O', 'Y'], key=f"{pt}_counter_{i}")
         pt_settings[pt] = {"start": ps_t, "end": pe_t, "meal": pm_t, "can_counter": can_counter}
 
-# 5. 로테이션 생성 함수
-def generate_v23():
+# 5. 로테이션 알고리즘 (TO 및 2시간 연속 금지 반영)
+def generate_v26():
     all_starts = [conf["start"] for conf in group_configs.values()] + ([p["start"] for p in pt_settings.values()] if pt_settings else [10])
     all_ends = [conf["end"] for conf in group_configs.values()] + ([p["end"] for p in pt_settings.values()] if pt_settings else [20])
     time_slots = [f"{h}:00" for h in range(min(all_starts), max(all_ends))]
@@ -101,39 +94,41 @@ def generate_v23():
         curr_h = int(slot.split(":")[0])
         row = {"시간": slot}
         ft_working = [ft for ft in working_ft if slot not in group_configs[ft_assignments[ft]]["meals"]]
-        pt_working = [pt for pt in working_pt if slot != pt_settings[pt]["meal"] and pt_settings[pt]["start"] <= curr_h < pt_settings[pt]["end"]]
+        pt_working = [pt for pt in working_pt if slot != pt_settings[pt].get("meal") and pt_settings[pt]["start"] <= curr_h < pt_settings[pt]["end"]]
         
         counter_pool = ft_working + [pt for pt in pt_working if pt_settings[pt]["can_counter"]]
-        random.shuffle(counter_pool); assign = {z: [] for z in target_zones}
+        random.shuffle(counter_pool)
         
-        primary_zone = target_zones[0]
-        if counter_pool:
-            chosen = counter_pool.pop(0); assign[primary_zone].append(chosen)
-            if chosen in ft_working: ft_working.remove(chosen)
-            else: pt_working.remove(chosen)
-        else: assign[primary_zone].append("X")
+        pool = ft_working + pt_working
+        random.shuffle(pool)
+        assign = {z: [] for z in target_zones}
         
-        remaining_pool = ft_working + pt_working; random.shuffle(remaining_pool)
-        for z in [z for z in target_zones if z != primary_zone]:
-            if remaining_pool:
-                valid = [p for p in remaining_pool if p not in zone_history[z]]
-                chosen = random.choice(valid if valid else remaining_pool)
-                assign[z].append(chosen)
-                remaining_pool.remove(chosen)
-            else: assign[z].append("X")
-        
-        while remaining_pool:
-            z = target_zones[random.randint(0, len(target_zones)-1)]
-            assign[z].append(remaining_pool.pop())
-            
+        for z in target_zones:
+            to = zone_to_map[z]
+            for _ in range(to):
+                if z == target_zones[0]: # 카운터 우선 배치
+                    if counter_pool:
+                        p = counter_pool.pop(0)
+                        assign[z].append(p)
+                        if p in pool: pool.remove(p)
+                    else: assign[z].append("X")
+                else:
+                    if pool:
+                        valid = [p for p in pool if p not in zone_history[z]]
+                        chosen = random.choice(valid if valid else pool)
+                        assign[z].append(chosen)
+                        pool.remove(chosen)
+                    else: assign[z].append("X")
+
         for z in target_zones:
             row[z] = ", ".join(assign[z])
-            zone_history[z] = (assign[z] + zone_history[z])[:2]
+            zone_history[z] = (assign[z] + zone_history[z])[:to*2]
         final_rows.append(row)
     return pd.DataFrame(final_rows)
 
+# 6. 실행 및 출력
 if st.sidebar.button("🚀 로테이션 생성"):
-    st.session_state.df = generate_v23()
+    st.session_state.df = generate_v26()
 
 if 'df' in st.session_state:
     st.subheader(f"📊 {selected_store} 로테이션 결과")
