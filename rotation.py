@@ -5,7 +5,7 @@ import re
 
 # 1. 페이지 설정
 st.set_page_config(page_title="GM Manager Central", layout="wide")
-st.title("🕶️ GENTLE MONSTER 전사 통합 로테이션 (v51.0)")
+st.title("🕶️ GENTLE MONSTER 전사 통합 로테이션 (v53.0)")
 
 # 💡 관리자님의 실제 시트 ID 입력
 SHEET_ID = "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q" 
@@ -66,8 +66,8 @@ lunch_configs = {}; dinner_configs = {}
 
 with st.sidebar.expander("🍴 식사 조별 시간 설정"):
     for label in group_labels:
-        lunch_configs[label] = st.selectbox(f"점심 {label}조", all_time_slots, index=all_time_slots.index("12:00"), key=f"L_{label}")
-        dinner_configs[label] = st.selectbox(f"저녁 {label}조", all_time_slots, index=all_time_slots.index("18:00"), key=f"D_{label}")
+        lunch_configs[label] = st.selectbox(f"점심 {label}조", all_time_slots, index=4, key=f"L_{label}")
+        dinner_configs[label] = st.selectbox(f"저녁 {label}조", all_time_slots, index=10, key=f"D_{label}")
 
 ft_settings = {}
 for ft in working_ft:
@@ -88,18 +88,17 @@ for pt in working_pt:
     r = match.iloc[0] if not match.empty else {}
     ps_v = int(float(r.get('출근시간', 10))) if r.get('출근시간') else 10
     pe_v = int(float(r.get('퇴근시간', 20))) if r.get('퇴근시간') else 20
-    pm_v = str(r.get('식사시간', '13:00')) if r.get('식사시간') else '13:00'
-    
+    pm_v = str(r.get('식사시간', '13:00'))
     with st.sidebar.expander(f"📌 {pt} (파트타이머)"):
-        ps_t = st.number_input(f"{pt} 출근", 0, 23, ps_v, key=f"ps_{pt}")
-        pe_t = st.number_input(f"{pt} 퇴근", 0, 23, pe_v, key=f"pe_{pt}")
+        ps_pt = st.number_input(f"{pt} 출근", 0, 23, ps_v, key=f"ps_val_{pt}")
+        pe_pt = st.number_input(f"{pt} 퇴근", 0, 23, pe_v, key=f"pe_val_{pt}")
         pm_idx = all_time_slots.index(pm_v) if pm_v in all_time_slots else 5
-        pm_t = st.selectbox(f"{pt} 식사", all_time_slots, index=pm_idx, key=f"pm_{pt}")
-        can_counter = st.checkbox(f"{pt} 카운터 가능", value=str(r.get('카운터여부','X')).upper() in ['O', 'Y'], key=f"pc_{pt}")
-        pt_settings[pt] = {"start": ps_t, "end": pe_t, "meal": pm_t, "can_counter": can_counter}
+        pm_pt = st.selectbox(f"{pt} 식사", all_time_slots, index=pm_idx, key=f"pm_val_{pt}")
+        can_counter = st.checkbox(f"{pt} 카운터 가능", value=str(r.get('카운터여부','X')).upper() in ['O', 'Y'], key=f"pc_val_{pt}")
+        pt_settings[pt] = {"start": ps_pt, "end": pe_pt, "meal": pm_pt, "can_counter": can_counter}
 
-# 5. [수정] 로테이션 알고리즘 (파트타이머 가용성 체크 강화)
-def generate_v51():
+# 5. 로테이션 알고리즘 (v52.0 유지)
+def generate_v53():
     slots = [f"{h}:00" for h in range(8, 23)]
     names = working_ft + working_pt
     matrix = {n: {s: "-" for s in slots} for n in names}
@@ -107,61 +106,59 @@ def generate_v51():
 
     for s in slots:
         curr_h = int(s.split(":")[0])
-        # 가용 인원 선별 로직 수정
-        ft_w = [f for f in working_ft if ft_settings[f]["start"] <= curr_h < ft_settings[f]["end"]]
-        pt_w = [p for p in working_pt if pt_settings[p]["start"] <= curr_h < pt_settings[p]["end"]]
-        
-        # 식사 중인 사람 먼저 표기
-        for f in ft_w:
-            if s in ft_settings[f]["meals"]: matrix[f][s] = "🍴식사"
-        for p in pt_w:
-            if s == pt_settings[p]["meal"]: matrix[p][s] = "🍴식사"
-            
-        # 👑 진짜 배정 가능한 풀 (출근 중 & 식사 아님)
-        pool = [m for m in (ft_w + pt_w) if matrix[m][s] == "-"]
+        active_now = []
+        for n in names:
+            if n in ft_settings:
+                if ft_settings[n]["start"] <= curr_h < ft_settings[n]["end"]:
+                    if s in ft_settings[n]["meals"]: matrix[n][s] = "🍴식사"
+                    else: active_now.append(n)
+            elif n in pt_settings:
+                if pt_settings[n]["start"] <= curr_h < pt_settings[n]["end"]:
+                    if s == pt_settings[n]["meal"]: matrix[n][s] = "🍴식사"
+                    else: active_now.append(n)
+
+        pool = active_now.copy()
         random.shuffle(pool)
-        
-        # 구역별 배정
         for z in target_zones:
             max_to = zone_to_map[z]
             for _ in range(max_to):
                 if not pool: break
-                
-                # 2시간 연속 금지 후보
                 cands = [m for m in pool if last_z[m] != z]
                 choice = random.choice(cands if cands else pool)
-                
-                # 첫 구역(카운터) 숙련도 체크
                 if z == target_zones[0]:
                     skilled = [m for m in (cands if cands else pool) if m in working_ft or pt_settings.get(m, {}).get("can_counter", False)]
                     if skilled: choice = random.choice(skilled)
-                
                 matrix[choice][s] = z
-                pool.remove(choice)
-                last_z[choice] = z
-        
+                pool.remove(choice); last_z[choice] = z
         for m in pool: 
             matrix[m][s] = "📢지원"; last_z[m] = "📢지원"
 
-    df = pd.DataFrame.from_dict(matrix, orient='index')
-    return df.loc[:, (df != "-").any(axis=0)]
+    return pd.DataFrame.from_dict(matrix, orient='index').loc[:, (pd.DataFrame.from_dict(matrix, orient='index') != "-").any(axis=0)]
 
-# 6. 표 디자인
-def apply_styles(val):
-    if val == "🍴식사": return 'background-color: #FFFF00; color: black; font-weight: bold; border: 1.5px solid black'
-    if val == "📢지원": return 'color: #00FF00; font-weight: bold'
-    if val == "-": return 'color: #555555'
-    return ''
-
-def row_styles(row):
-    if row.name in working_ft: return ['background-color: #1A1A1A; color: white'] * len(row)
-    return [''] * len(row)
-
+# 6. 실행 및 결과 (수정 기능 복구)
 if st.sidebar.button("🚀 로테이션 생성"):
-    st.session_state.df_v51 = generate_v51()
+    st.session_state.df_v53 = generate_v53()
 
-if 'df_v46' in st.session_state: del st.session_state['df_v46'] # 이전 세션 삭제
-if 'df_v51' in st.session_state:
-    st.subheader(f"📊 {selected_store} 최종 스케줄")
-    styled_df = st.session_state.df_v51.style.apply(row_styles, axis=1).applymap(apply_styles)
-    st.table(styled_df)
+if 'df_v53' in st.session_state:
+    st.subheader(f"📊 {selected_store} 스케줄 (칸을 더블클릭하여 수정 가능)")
+    
+    # ⭐ st.data_editor를 사용하여 수정 기능 복구
+    # 스타일링(색상)은 데이터 에디터에서 직접 지원하지 않으므로, 
+    # 가독성을 위해 '🍴식사' 등의 텍스트는 유지됩니다.
+    edited_df = st.data_editor(
+        st.session_state.df_v53, 
+        use_container_width=True, 
+        height=600
+    )
+    
+    # (선택사항) 최종 확정된 표를 색상과 함께 보고 싶을 때를 위한 토글
+    if st.checkbox("🎨 색상 강조 보기 (수정 불가 모드)"):
+        def apply_styles(val):
+            if val == "🍴식사": return 'background-color: #FFFF00; color: black; font-weight: bold'
+            if val == "📢지원": return 'color: #00FF00; font-weight: bold'
+            return ''
+        def row_styles(row):
+            if row.name in working_ft: return ['background-color: #1A1A1A; color: white'] * len(row)
+            return [''] * len(row)
+        
+        st.table(edited_df.style.apply(row_styles, axis=1).applymap(apply_styles))
