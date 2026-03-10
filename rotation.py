@@ -4,30 +4,35 @@ import random
 
 # 1. 페이지 및 구글 시트 설정
 st.set_page_config(page_title="GM Manager Central", layout="wide")
-st.title("🕶️ GENTLE MONSTER 전사 통합 로테이션 (v21.0)")
+st.title("🕶️ GENTLE MONSTER 전사 통합 로테이션 (v22.0)")
 
 # 💡 관리자님의 구글 시트 ID를 여기에 입력하세요!
-SHEET_ID = "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q/edit?gid=0#gid=0" 
-SHEET_NAME = "Sheet1"
+SHEET_ID = "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q" 
+SHEET_NAME = "Sheet1" 
 url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={SHEET_NAME}"
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=1)
 def load_db():
     try:
         df = pd.read_csv(url)
-        # 데이터 공백 제거 (안전 장치)
+        # 열 이름 및 데이터의 앞뒤 공백 제거 (KeyError 방지)
+        df.columns = [str(c).strip() for c in df.columns]
         for col in df.columns:
             if df[col].dtype == 'object':
-                df[col] = df[col].str.strip()
+                df[col] = df[col].astype(str).str.strip()
         return df
-    except:
+    except Exception as e:
+        st.error(f"❌ 시트 로드 실패: {e}")
         return pd.DataFrame()
 
 db_df = load_db()
 
 if db_df.empty:
-    st.error("❌ 구글 시트를 불러올 수 없습니다. ID와 공유 설정을 확인하세요.")
+    st.error("❌ 데이터를 가져오지 못했습니다. [공유 설정: 링크가 있는 모든 사용자]를 확인하세요.")
     st.stop()
+
+# ⭐ 강력 조치: 첫 번째 열을 강제로 '매장명'으로 인식
+db_df.rename(columns={db_df.columns[0]: '매장명'}, inplace=True)
 
 # 2. 매장 및 구역 자동 설정
 store_list = sorted(db_df['매장명'].unique())
@@ -35,19 +40,19 @@ selected_store = st.sidebar.selectbox("🏠 담당 매장 선택", store_list)
 
 store_data = db_df[db_df['매장명'] == selected_store]
 
-# ⭐ 시트에서 해당 매장의 '운영구역' 가져오기
-if '운영구역' in store_data.columns and not store_data['운영구역'].dropna().empty:
-    default_zones = str(store_data['운영구역'].iloc[0])
-else:
-    default_zones = "카운터, A, B, C"
+# '운영구역' 열 자동 찾기
+zone_col = '운영구역' if '운영구역' in store_data.columns else store_data.columns[-1]
+default_zones = str(store_data[zone_col].iloc[0]) if not store_data[zone_col].dropna().empty else "카운터, A, B, C"
 
 st.sidebar.header("📍 구역 설정")
-zone_input = st.sidebar.text_input("운영 구역 (시트 자동 로드)", default_zones)
+zone_input = st.sidebar.text_input("운영 구역", default_zones)
 target_zones = [z.strip() for z in zone_input.split(",") if z.strip()]
 
-# 3. 인원 선택 및 상세 설정
-all_ft = store_data[store_data['구분'] == '정직원']['이름'].tolist()
-all_pt = store_data[store_data['구분'] == '파트타이머']['이름'].tolist()
+# 3. 인원 선택 (정직원/파트타이머 분류)
+# '구분' 열이 없으면 세 번째 열을 사용
+type_col = '구분' if '구분' in store_data.columns else store_data.columns[2]
+all_ft = store_data[store_data[type_col] == '정직원']['이름'].tolist()
+all_pt = store_data[store_data[type_col] == '파트타이머']['이름'].tolist()
 
 st.sidebar.divider()
 working_ft = st.sidebar.multiselect("✅ 오늘 출근 정직원", all_ft, default=all_ft)
@@ -79,8 +84,8 @@ for pt in working_pt:
         can_counter = st.checkbox(f"{pt} 카운터 가능", value=False, key=f"{pt}_counter")
         pt_settings[pt] = {"start": ps_t, "end": pe_t, "meal": pm_t, "can_counter": can_counter}
 
-# 4. 핵심 로직 (정직원/숙련알바 우선 배치 포함)
-def generate_v21():
+# 4. 로테이션 생성 로직
+def generate_v22():
     all_starts = [conf["start"] for conf in group_configs.values()] + ([p["start"] for p in pt_settings.values()] if pt_settings else [10])
     all_ends = [conf["end"] for conf in group_configs.values()] + ([p["end"] for p in pt_settings.values()] if pt_settings else [20])
     time_slots = [f"{h}:00" for h in range(min(all_starts), max(all_ends))]
@@ -98,7 +103,7 @@ def generate_v21():
         random.shuffle(counter_pool)
         assign = {z: [] for z in target_zones}
         
-        # 1. 카운터(첫 구역) 우선 배치
+        # 카운터 우선 배치
         primary_zone = target_zones[0]
         if counter_pool:
             chosen = counter_pool.pop(0)
@@ -107,7 +112,7 @@ def generate_v21():
             else: pt_working.remove(chosen)
         else: assign[primary_zone].append("X")
 
-        # 2. 나머지 구역 배치
+        # 나머지 구역 배치
         remaining_pool = ft_working + pt_working
         random.shuffle(remaining_pool)
         for z in [z for z in target_zones if z != primary_zone]:
@@ -128,10 +133,10 @@ def generate_v21():
         final_rows.append(row)
     return pd.DataFrame(final_rows)
 
-# 5. 실행 및 출력
+# 5. 실행
 if st.sidebar.button("🚀 로테이션 생성"):
-    st.session_state.df = generate_v21()
+    st.session_state.df = generate_v22()
 
 if 'df' in st.session_state:
-    st.subheader(f"📊 {selected_store} 로테이션 결과")
+    st.subheader(f"📊 {selected_store} 로테이션")
     st.data_editor(st.session_state.df, use_container_width=True)
