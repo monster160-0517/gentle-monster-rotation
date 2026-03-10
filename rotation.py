@@ -19,7 +19,7 @@ def load_db():
         if df.empty: return pd.DataFrame()
         df.columns = [str(c).strip() for c in df.columns]
         # 데이터 정리
-        df = df.astype(str).replace(['nan', 'None', 'nan.0'], None).apply(lambda x: x.str.strip() if hasattr(x, "str") else x)
+        df = df.astype(str).replace(['nan', 'None', 'nan.0'], None).apply(lambda x: x.strip() if x else x)
         return df
     except: return pd.DataFrame()
 
@@ -64,10 +64,10 @@ all_pt = extract_names(store_data, '파트')
 
 st.sidebar.subheader("👥 인원 선택")
 working_ft = st.sidebar.multiselect("정직원", all_ft, default=all_ft)
-working_pt = st.sidebar.multiselect("파트타이머", all_pt, default=all_pt)
+working_pt = st.sidebar.multiselect("파트타이머", working_pt if 'working_pt' in locals() else all_pt, default=all_pt)
 
 # 4. 상세 시간 설정
-all_time_slots = [f"{h:02d}:00" for h in range(10, 22)]
+all_time_slots = [f"{h:02d}:00" for h in range(8, 24)] # 08시부터 23시까지 선택폭 확장
 group_labels = ["A", "B", "C", "D", "E"]
 lunch_configs = {}
 dinner_configs = {}
@@ -76,12 +76,9 @@ with st.sidebar.expander("🍴 공통 식사 시간대 설정"):
     for label in group_labels:
         col_l, col_r = st.columns(2)
         with col_l:
-            # 기본값 설정: A(11:00), B(12:00), C(13:00) 등 순차적으로 자동 지정
-            default_l_idx = group_labels.index(label) + 1 
-            lunch_configs[label] = st.selectbox(f"점심 {label}조", all_time_slots, index=min(default_l_idx, len(all_time_slots)-1), key=f"L_cfg_{label}")
+            lunch_configs[label] = st.selectbox(f"점심 {label}조", all_time_slots, index=4, key=f"L_cfg_{label}")
         with col_r:
-            default_d_idx = group_labels.index(label) + 7
-            dinner_configs[label] = st.selectbox(f"저녁 {label}조", all_time_slots, index=min(default_d_idx, len(all_time_slots)-1), key=f"D_cfg_{label}")
+            dinner_configs[label] = st.selectbox(f"저녁 {label}조", all_time_slots, index=10, key=f"D_cfg_{label}")
 
 # 인원별 세부 세팅 수집
 combined_settings = {}
@@ -91,12 +88,16 @@ for name in working_ft + working_pt:
     match = store_data[store_data['이름'] == name]
     r = match.iloc[0] if not match.empty else {}
     
-    # 기본값 파싱 (에러 방지용 초기값 설정)
+    # 에러 방지를 위해 범위를 0~23으로 넓게 잡음
     try:
         def_s = int(float(r.get('출근시간', 11)))
         def_e = int(float(r.get('퇴근시간', 21)))
     except:
         def_s, def_e = 11, 21
+
+    # 만약 시트 값이 0~23 범위를 벗어나면 강제 조정
+    def_s = max(0, min(23, def_s))
+    def_e = max(0, min(23, def_e))
 
     l_grp = str(r.get('점심조', 'A')).upper()
     d_grp = str(r.get('저녁조', 'A')).upper()
@@ -105,16 +106,16 @@ for name in working_ft + working_pt:
     with st.sidebar.expander(f"{'👤' if is_ft else '⏱️'} {name}"):
         col1, col2 = st.columns(2)
         with col1:
-            s_time = st.number_input(f"출근", 8, 22, def_s, key=f"s_{name}")
+            s_input = st.number_input(f"출근", 0, 23, def_s, key=f"s_{name}")
         with col2:
-            e_time = st.number_input(f"퇴근", 9, 23, def_e, key=f"e_{name}")
+            e_input = st.number_input(f"퇴근", 0, 23, def_e, key=f"e_{name}")
         
-        l_choice = st.selectbox(f"점심조", group_labels, index=group_labels.index(l_v) if 'l_v' in locals() and l_v in group_labels else group_labels.index(l_grp) if l_grp in group_labels else 0, key=f"lc_{name}")
-        d_choice = st.selectbox(f"저녁조", group_labels, index=group_labels.index(d_v) if 'd_v' in locals() and d_v in group_labels else group_labels.index(d_grp) if d_grp in group_labels else 0, key=f"dc_{name}")
+        l_choice = st.selectbox(f"점심조", group_labels, index=group_labels.index(l_grp) if l_grp in group_labels else 0, key=f"lc_{name}")
+        d_choice = st.selectbox(f"저녁조", group_labels, index=group_labels.index(d_grp) if d_grp in group_labels else 0, key=f"dc_{name}")
         c_auth = st.checkbox("카운터 가능", value=is_c, key=f"auth_{name}")
         
         combined_settings[name] = {
-            "range": range(s_time, e_time),
+            "range": range(s_input, e_input),
             "meals": [lunch_configs[l_choice], dinner_configs[d_choice]],
             "can_counter": c_auth,
             "is_ft": is_ft
@@ -122,18 +123,18 @@ for name in working_ft + working_pt:
 
 # 5. 로테이션 생성 엔진
 def run_rotation():
+    display_time_slots = [f"{h:02d}:00" for h in range(10, 22)] # 출력할 시간대 (10시~21시)
     all_staff = working_ft + working_pt
-    # 결과 데이터 구조 (Rows: Time, Cols: Staff)
-    schedule_df = pd.DataFrame(index=all_time_slots, columns=all_staff)
+    
+    schedule_df = pd.DataFrame(index=display_time_slots, columns=all_staff)
     schedule_df.fillna("-", inplace=True)
     
     last_positions = {name: "" for name in all_staff}
     
-    for slot in all_time_slots:
+    for slot in display_time_slots:
         hour = int(slot.split(":")[0])
         available_pool = []
         
-        # 1. 해당 시간에 근무 및 식사 여부 확인
         for name in all_staff:
             setting = combined_settings[name]
             if hour in setting["range"]:
@@ -145,22 +146,19 @@ def run_rotation():
             else:
                 schedule_df.at[slot, name] = " "
 
-        # 셔플하여 랜덤성 부여
         random.shuffle(available_pool)
         
-        # 2. 구역별로 인원 배정 (설정된 TO만큼)
         for zone in target_zones:
             needed = zone_to_map[zone]
             assigned_count = 0
             
-            # 이 구역에 들어갈 수 있는 후보 필터링
             eligible_candidates = []
             for name in available_pool:
                 if "카운터" in zone and not combined_settings[name]["can_counter"]:
                     continue
                 eligible_candidates.append(name)
 
-            # 직전 구역과 다른 사람 우선순위 (가능한 경우)
+            # 직전 구역 회피 로직
             eligible_candidates.sort(key=lambda x: last_positions[x] == zone)
 
             for name in list(eligible_candidates):
@@ -172,7 +170,7 @@ def run_rotation():
                 else:
                     break
         
-        # 3. 남은 인원 '📢지원'으로 배정 (TO 초과분 수용)
+        # 남은 인원은 '📢지원'으로 배정
         for name in list(available_pool):
             schedule_df.at[slot, name] = "📢지원"
             last_positions[name] = "📢지원"
@@ -185,7 +183,7 @@ if st.sidebar.button("🚀 로테이션 자동 생성"):
 
 if 'result_df' in st.session_state:
     st.write("### 📅 생성된 로테이션 스케줄")
-    st.info("💡 셀을 수정하려면 더블클릭하세요. 수정 완료 후 아래 '배치 현황'에서 TO 초과 여부를 확인하세요.")
+    st.info("💡 셀을 더블클릭하여 수정 가능합니다. (행: 시간 / 열: 이름)")
     
     # 데이터 에디터 출력
     edited_result = st.data_editor(
@@ -197,7 +195,7 @@ if 'result_df' in st.session_state:
     # 현황 요약 (TO 대비 실제 배치 인원)
     with st.expander("📊 실시간 구역별 인원 배치 현황 (TO 체크)"):
         summary_data = []
-        for slot in all_time_slots:
+        for slot in edited_result.index:
             row_summary = {"시간": slot}
             for zone in target_zones:
                 count = (edited_result.loc[slot] == zone).sum()
@@ -205,6 +203,8 @@ if 'result_df' in st.session_state:
                 status = f"{count}/{limit}"
                 if count > limit:
                     status = f"⚠️ {count}/{limit} (초과)"
+                elif count < limit:
+                    status = f"❗ {count}/{limit} (부족)"
                 row_summary[zone] = status
             summary_data.append(row_summary)
         
