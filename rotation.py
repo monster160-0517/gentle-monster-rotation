@@ -5,7 +5,7 @@ import re
 
 # 1. 페이지 설정
 st.set_page_config(page_title="GM Manager Central", layout="wide")
-st.title("🕶️ GENTLE MONSTER 전사 통합 로테이션 (v45.0)")
+st.title("🕶️ GENTLE MONSTER 전사 통합 로테이션 (v46.0)")
 
 # 💡 관리자님의 실제 시트 ID 입력
 SHEET_ID = "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q" 
@@ -55,11 +55,10 @@ def extract_names(data, keyword):
     filtered = data[data[type_col].str.contains(keyword, na=False, case=False)]
     return [n.replace('.0', '') for n in filtered[name_col].dropna().tolist() if n != 'None']
 
-all_ft = extract_names(store_data, '정직'); all_pt = extract_names(store_data, '파트')
-working_ft = st.sidebar.multiselect("✅ 오늘 출근 정직원", all_ft, default=all_ft)
-working_pt = st.sidebar.multiselect("✅ 오늘 출근 파트타이머", all_pt, default=all_pt)
+working_ft = st.sidebar.multiselect("✅ 오늘 출근 정직원", extract_names(store_data, '정직'), default=extract_names(store_data, '정직'))
+working_pt = st.sidebar.multiselect("✅ 오늘 출근 파트타이머", extract_names(store_data, '파트'), default=extract_names(store_data, '파트'))
 
-# 4. 상세 설정 (사이드바 제어)
+# 4. 상세 설정
 group_labels = ["A", "B", "C", "D", "E"]
 lunch_configs = {}; dinner_configs = {}
 with st.sidebar.expander("🍴 식사 조별 시간 설정"):
@@ -69,38 +68,28 @@ with st.sidebar.expander("🍴 식사 조별 시간 설정"):
 
 ft_settings = {}
 for i, ft in enumerate(working_ft):
-    l_v, d_v, s_v, e_v = "A", "A", 10, 20
     match = store_data[store_data[next(c for c in store_data.columns if '이름' in c)] == ft]
-    if not match.empty:
-        r = match.iloc[0]
-        l_v = str(r.get('점심조', 'A')).upper(); d_v = str(r.get('저녁조', 'A')).upper()
-        try: s_v = int(float(r.get('출근시간', 10))); e_v = int(float(r.get('퇴근시간', 20)))
-        except: pass
+    r = match.iloc[0] if not match.empty else {}
     with st.sidebar.expander(f"💼 {ft} (정직원)"):
-        fs_t = st.number_input(f"{ft} 출근", 8, 22, s_v, key=f"fs_{ft}")
-        fe_t = st.number_input(f"{ft} 퇴근", 9, 23, e_v, key=f"fe_{ft}")
-        f_lunch = st.selectbox(f"{ft} 점심조", group_labels, index=group_labels.index(l_v) if l_v in group_labels else 0, key=f"fl_{ft}")
-        f_dinner = st.selectbox(f"{ft} 저녁조", group_labels, index=group_labels.index(d_v) if d_v in group_labels else 0, key=f"fd_{ft}")
+        fs_t = st.number_input(f"{ft} 출근", 8, 22, int(float(r.get('출근시간', 10))), key=f"fs_{ft}")
+        fe_t = st.number_input(f"{ft} 퇴근", 9, 23, int(float(r.get('퇴근시간', 20))), key=f"fe_{ft}")
+        f_lunch = st.selectbox(f"{ft} 점심조", group_labels, index=group_labels.index(str(r.get('점심조','A')).upper()) if str(r.get('점심조','A')).upper() in group_labels else 0, key=f"fl_{ft}")
+        f_dinner = st.selectbox(f"{ft} 저녁조", group_labels, index=group_labels.index(str(r.get('저녁조','A')).upper()) if str(r.get('저녁조','A')).upper() in group_labels else 0, key=f"fd_{ft}")
         ft_settings[ft] = {"start": fs_t, "end": fe_t, "meals": [lunch_configs[f_lunch], dinner_configs[f_dinner]]}
 
 pt_settings = {}
 for i, pt in enumerate(working_pt):
-    ps_v, pe_v, pm_v, pc_v = 10, 20, '13:00', False
     match = store_data[store_data[next(c for c in store_data.columns if '이름' in c)] == pt]
-    if not match.empty:
-        r = match.iloc[0]
-        try: ps_v = int(float(r.get('출근시간', 10))); pe_v = int(float(r.get('퇴근시간', 20)))
-        except: pass
-        pm_v = str(r.get('식사시간', '13:00')); pc_v = str(r.get('카운터여부','X')).upper() in ['O', 'Y']
+    r = match.iloc[0] if not match.empty else {}
     with st.sidebar.expander(f"📌 {pt} (파트타이머)"):
-        ps_t = st.number_input(f"{pt} 출근", 8, 22, ps_v, key=f"ps_{pt}")
-        pe_t = st.number_input(f"{pt} 퇴근", 9, 23, pe_v, key=f"pe_{pt}")
+        ps_t = st.number_input(f"{pt} 출근", 8, 22, int(float(r.get('출근시간', 10))), key=f"ps_{pt}")
+        pe_t = st.number_input(f"{pt} 퇴근", 9, 23, int(float(r.get('퇴근시간', 20))), key=f"pe_{pt}")
         pm_t = st.selectbox(f"{pt} 식사", [f"{h}:00" for h in range(8, 23)], index=5, key=f"pm_{pt}")
-        can_counter = st.checkbox(f"{pt} 카운터 가능", value=pc_v, key=f"pc_{pt}")
+        can_counter = st.checkbox(f"{pt} 카운터 가능", value=str(r.get('카운터여부','X')).upper() in ['O', 'Y'], key=f"pc_{pt}")
         pt_settings[pt] = {"start": ps_t, "end": pe_t, "meal": pm_t, "can_counter": can_counter}
 
-# 5. 로테이션 알고리즘 (동일)
-def generate_v45():
+# 5. 로테이션 알고리즘 (2시간 연속 금지 + TO 엄수)
+def generate_v46():
     time_slots = [f"{h}:00" for h in range(8, 23)]
     manager_names = working_ft + working_pt
     matrix = {name: {slot: "-" for slot in time_slots} for name in manager_names}
@@ -130,7 +119,6 @@ def generate_v45():
                     if skilled: choice = random.choice(skilled)
                 matrix[choice][slot] = z
                 pool.remove(choice); last_zone[choice] = z
-        
         for m in pool: 
             matrix[m][slot] = "📢지원"
             last_zone[m] = "📢지원"
@@ -138,29 +126,26 @@ def generate_v45():
     df = pd.DataFrame.from_dict(matrix, orient='index')
     return df.loc[:, (df != "-").any(axis=0)]
 
-# 6. 표 디자인 적용 함수
-def color_rules(val):
-    if val == "🍴식사": return "background-color: #ffeb3b; color: black; font-weight: bold"
-    if val == "📢지원": return "color: #4caf50; font-weight: bold"
-    if val == "X": return "color: #f44336"
-    if val == "-": return "color: #424242"
-    return ""
+# 6. 디자인 (식사 강조 최우선)
+def apply_styles(val):
+    if val == "🍴식사":
+        return 'background-color: #FFFF00; color: black; font-weight: bold; border: 1.5px solid black'
+    if val == "📢지원":
+        return 'color: #00FF00; font-weight: bold'
+    if val == "-":
+        return 'color: #555555'
+    return ''
 
-def row_rules(row):
-    # 정직원은 약간 더 어두운 배경, 파트타이머는 기본 배경
+def row_styles(row):
     if row.name in working_ft:
-        return ['background-color: #262626'] * len(row)
+        return ['background-color: #1A1A1A; color: white'] * len(row)
     return [''] * len(row)
 
 if st.sidebar.button("🚀 로테이션 생성"):
-    st.session_state.df_v45 = generate_v45()
+    st.session_state.df_v46 = generate_v46()
 
-if 'df_v45' in st.session_state:
-    st.subheader(f"📊 {selected_store} 스케줄표")
-    
-    # 디자인 스타일 적용
-    styled_df = st.session_state.df_v45.style\
-        .applymap(color_rules)\
-        .apply(row_rules, axis=1)
-    
-    st.table(styled_df) # 스타일을 유지하기 위해 st.table 사용 (또는 st.dataframe)
+if 'df_v46' in st.session_state:
+    st.subheader(f"📊 {selected_store} 최종 스케줄")
+    # ⭐ style.applymap(식사)가 style.apply(행)보다 나중에 적용되어 식사 색깔이 우선함
+    styled_df = st.session_state.df_v46.style.apply(row_styles, axis=1).applymap(apply_styles)
+    st.table(styled_df)
