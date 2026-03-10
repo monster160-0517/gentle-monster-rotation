@@ -4,8 +4,8 @@ import random
 import re
 
 # 1. 페이지 설정 및 데이터 로드
-st.set_page_config(page_title="GM Manager Central", layout="wide") # wide 모드로 화면을 넓게 사용
-st.title("🕶️ GENTLE MONSTER 전사 통합 로테이션 (v38.0)")
+st.set_page_config(page_title="GM Manager Central", layout="wide")
+st.title("🕶️ GENTLE MONSTER 전사 통합 로테이션 (v39.0)")
 
 # 💡 관리자님의 실제 시트 ID 입력
 SHEET_ID = "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q" 
@@ -23,17 +23,18 @@ def load_db():
 
 db_df = load_db()
 if db_df.empty:
-    st.error("❌ 시트 로드 실패 - ID 및 공유 설정을 확인하세요."); st.stop()
+    st.error("❌ 시트 로드 실패"); st.stop()
 
 db_df.rename(columns={db_df.columns[0]: '매장명'}, inplace=True)
 store_list = sorted([s for s in db_df['매장명'].unique() if s and str(s).lower() != 'none'])
 selected_store = st.sidebar.selectbox("🏠 담당 매장 선택", store_list)
 store_data = db_df[db_df['매장명'] == selected_store].copy()
 
-# 2. 구역 및 TO 설정 (사이드바 유지)
+# 2. 구역 및 TO 설정 (순서대로 우선순위 부여)
 zone_col = '운영구역' if '운영구역' in store_data.columns else store_data.columns[-1]
 raw_zones = str(store_data[zone_col].iloc[0]) if not store_data[zone_col].dropna().empty else "카운터(1), A(1)"
-zone_input = st.sidebar.text_input("📍 운영 구역 및 TO", raw_zones)
+st.sidebar.info("💡 왼쪽부터 순서대로 인원이 우선 배정됩니다.")
+zone_input = st.sidebar.text_input("📍 운영 구역 및 TO (순서=우선순위)", raw_zones)
 
 zone_to_map = {}
 for z_info in zone_input.split(","):
@@ -54,7 +55,7 @@ all_ft = extract_names(store_data, '정직'); all_pt = extract_names(store_data,
 working_ft = st.sidebar.multiselect("✅ 오늘 출근 정직원", all_ft, default=all_ft)
 working_pt = st.sidebar.multiselect("✅ 오늘 출근 파트타이머", all_pt, default=all_pt)
 
-# 4. 식사 및 개인 설정 (v37.0 기능 100% 유지)
+# 4. 식사 및 개인 설정 (v38.0 동일)
 group_labels = ["A", "B", "C", "D", "E"]
 lunch_configs = {}; dinner_configs = {}
 with st.sidebar.expander("🕛 식사 조별 시간 설정"):
@@ -95,8 +96,8 @@ for i, pt in enumerate(working_pt):
         can_counter = st.checkbox(f"{pt} 카운터 가능", value=curr_cnt, key=f"pc_{pt}_{i}")
         pt_settings[pt] = {"start": ps_t, "end": pe_t, "meal": pm_t, "can_counter": can_counter}
 
-# 5. 로테이션 알고리즘 (X방지 유지)
-def generate_v38():
+# 5. [업데이트] 우선순위 기반 배정 알고리즘
+def generate_v39():
     time_slots = [f"{h}:00" for h in range(8, 23)]
     final_rows = []; zone_history = {z: [] for z in target_zones}
     for slot in time_slots:
@@ -105,38 +106,42 @@ def generate_v38():
         ft_working = [f for f in working_ft if ft_settings[f]["start"] <= curr_h < ft_settings[f]["end"] and slot not in ft_settings[f]["meals"]]
         pt_working = [p for p in working_pt if pt_settings[p]["start"] <= curr_h < pt_settings[p]["end"] and slot != pt_settings[p]["meal"]]
         if not ft_working and not pt_working and not eating: continue
+        
         row = {"시간": slot, "🍴 식사중": ", ".join(eating) if eating else "-"}
         pool = ft_working + pt_working; random.shuffle(pool)
         counter_pool = [p for p in pool if p in ft_working or pt_settings.get(p, {}).get("can_counter", False)]
         assign = {z: [] for z in target_zones}
-        for z in target_zones:
-            if not pool: break
-            chosen = counter_pool.pop(0) if (z == target_zones[0] and counter_pool) else random.choice([p for p in pool if p not in zone_history[z]] or pool)
-            assign[z].append(chosen); pool.remove(chosen)
-            if chosen in counter_pool: counter_pool.remove(chosen)
+        
+        # ⭐ 우선순위 배정 로직: target_zones의 순서대로 TO를 채워나감
         for z in target_zones:
             max_to = zone_to_map[z]
-            while len(assign[z]) < max_to and pool:
-                chosen = random.choice([p for p in pool if p not in zone_history[z]] or pool)
-                assign[z].append(chosen); pool.remove(chosen)
+            for _ in range(max_to):
+                if not pool: break
+                chosen = None
+                # 첫 번째 구역(대개 카운터)은 전용 풀에서 우선 선발
+                if z == target_zones[0] and counter_pool:
+                    chosen = counter_pool.pop(0)
+                else:
+                    valid = [p for p in pool if p not in zone_history[z]]
+                    chosen = random.choice(valid if valid else pool)
+                
+                if chosen:
+                    assign[z].append(chosen)
+                    pool.remove(chosen)
+                    if chosen in counter_pool: counter_pool.remove(chosen)
+
         row["📢 지원/휴식"] = ", ".join(pool) if pool else "-"
         for z in target_zones:
             row[z] = ", ".join(assign[z]) if assign[z] else "X"
-            zone_history[z] = (assign[z] + zone_history[z])[:5]
+            zone_history[z] = (assign[z] + zone_history[z])[:max_to*2]
         final_rows.append(row)
     return pd.DataFrame(final_rows)
 
-# 6. 결과 출력 (표 사이즈 최적화)
+# 6. 결과 출력
 if st.sidebar.button("🚀 로테이션 생성"):
-    st.session_state.df = generate_v38()
+    st.session_state.df = generate_v39()
 
 if 'df' in st.session_state:
     st.subheader(f"📊 {selected_store} 로테이션 결과")
     cols = ["시간", "🍴 식사중", "📢 지원/휴식"] + target_zones
-    # ⭐ height 설정을 통해 표의 세로 길이를 충분히 확보함
-    st.data_editor(
-        st.session_state.df[cols], 
-        use_container_width=True, 
-        height=800, # 표 높이를 800픽셀로 고정 (시원하게 보이게 함)
-        disabled=True # 결과표는 편집 불가 모드로 설정
-    )
+    st.data_editor(st.session_state.df[cols], use_container_width=True, height=800)
