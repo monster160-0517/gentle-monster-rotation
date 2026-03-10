@@ -10,7 +10,6 @@ st.title("🕶️ GENTLE MONSTER 로테이션 시스템")
 # 💡 실시간 구글 시트 데이터 로드
 SHEET_ID = "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q" 
 SHEET_NAME = "Sheet1" 
-url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={SHEET_NAME}"
 
 @st.cache_data(ttl=1)
 def load_db():
@@ -218,4 +217,5 @@ if 'result_df' in st.session_state:
         file_name='rotation_schedule.csv',
         mime='text/csv',
     )
+
 
