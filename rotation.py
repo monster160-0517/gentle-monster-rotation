@@ -8,7 +8,7 @@ st.set_page_config(page_title="GM Manager Central", layout="wide")
 st.title("🕶️ GENTLE MONSTER 전사 통합 로테이션 (v32.0)")
 
 # 💡 관리자님의 실제 시트 ID 입력
-SHEET_ID = "여기에_실제_시트_ID_입력" 
+SHEET_ID = "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q" 
 SHEET_NAME = "Sheet1" 
 url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={SHEET_NAME}"
 
@@ -142,3 +142,4 @@ if 'df' in st.session_state:
     df = st.session_state.df
     cols = ["시간", "🍴 식사중", "📢 지원/휴식"] + target_zones
     st.data_editor(df[cols], use_container_width=True)
+
