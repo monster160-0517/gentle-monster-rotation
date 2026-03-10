@@ -218,3 +218,4 @@ if 'result_df' in st.session_state:
         file_name='rotation_schedule.csv',
         mime='text/csv',
     )
+
