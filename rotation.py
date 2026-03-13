@@ -10,7 +10,7 @@ st.title("🕶️ GENTLE MONSTER 로테이션 시스템 v67.0")
 # 💡 구글 시트 정보 (공개 설정 필수)
 SHEET_ID = "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q"
 # [중요] '시간대별TO' 시트의 gid 숫자를 여기에 넣으세요.
-TO_SHEET_GID = "gid=2126973547" 
+TO_SHEET_GID = "2126973547" 
 
 @st.cache_data(ttl=1)
 def load_sheet_data(gid):
@@ -170,3 +170,4 @@ if 'result_df' in st.session_state:
                 row[zone] = status
             summary.append(row)
         st.table(pd.DataFrame(summary))
+
