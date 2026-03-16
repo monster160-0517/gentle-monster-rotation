@@ -5,21 +5,19 @@ import re
 
 # 1. 페이지 설정
 st.set_page_config(page_title="GM Manager Central", layout="wide")
-st.title("🕶️ GENTLE MONSTER 로테이션 시스템 v67.0")
+st.title("🕶️ GENTLE MONSTER 로테이션 시스템 v67.1")
 
 # 💡 구글 시트 정보 (공개 설정 필수)
 SHEET_ID = "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q"
-# [중요] '시간대별TO' 시트의 gid 숫자를 여기에 넣으세요.
+# [중요] '시간대별TO' 시트의 gid 숫자를 확인하여 여기에 넣으세요.
 TO_SHEET_GID = "2126973547" 
 
 @st.cache_data(ttl=1)
 def load_sheet_data(gid):
-    """특정 GID를 가진 시트 데이터를 CSV로 불러옵니다."""
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={gid}"
     try:
         df = pd.read_csv(url, skip_blank_lines=True)
         if df.empty: return pd.DataFrame()
-        # 컬럼명 정리 및 데이터 클리닝
         df.columns = [str(c).strip() for c in df.columns]
         df = df.astype(str).replace(r'\.0$', '', regex=True).replace(['nan', 'None', 'nan.0'], '')
         return df
@@ -35,8 +33,8 @@ def parse_time_value(val):
     except: return 0
 
 # 데이터 로드
-db_df = load_sheet_data("0")          # 인원 정보 시트 (기본)
-to_df = load_sheet_data(TO_SHEET_GID) # 시간대별 TO 시트
+db_df = load_sheet_data("0")
+to_df = load_sheet_data(TO_SHEET_GID)
 
 if db_df.empty or to_df.empty:
     st.warning("⚠️ 시트 데이터를 불러오는 중입니다. GID와 공유 설정을 확인해주세요.")
@@ -44,7 +42,6 @@ if db_df.empty or to_df.empty:
 
 # --- 사이드바 설정 ---
 st.sidebar.header("🕹️ 컨트롤 패널")
-
 db_df.rename(columns={db_df.columns[0]: '매장명'}, inplace=True)
 selected_store = st.sidebar.selectbox("🏠 담당 매장 선택", sorted(db_df['매장명'].unique()))
 store_data = db_df[db_df['매장명'] == selected_store].copy()
@@ -52,8 +49,7 @@ store_data = db_df[db_df['매장명'] == selected_store].copy()
 # 조별 식사 시간 설정
 time_options = [f"{h:02d}:00" for h in range(11, 22)]
 group_labels = ["A", "B", "C", "D", "E"]
-lunch_slots = {}
-dinner_slots = {}
+lunch_slots, dinner_slots = {}, {}
 
 with st.sidebar.expander("🍴 조별 식사 시간 설정"):
     for label in group_labels:
@@ -78,10 +74,7 @@ for name in working_ft + working_pt:
     s_time = parse_time_value(r.get('출근시간', 11))
     e_time = parse_time_value(r.get('퇴근시간', 21))
     if 0 < e_time < 12 and e_time < s_time: e_time += 12
-    
-    l_grp = str(r.get('점심조', 'A')).strip().upper()
-    d_grp = str(r.get('저녁조', 'A')).strip().upper()
-    
+    l_grp, d_grp = str(r.get('점심조', 'A')).strip().upper(), str(r.get('저녁조', 'A')).strip().upper()
     c_raw = str(r.get('카운터여부', 'X')).strip().lower()
     is_c = any(x in c_raw for x in ['o', 'y', '1', 'v', 'true', '예', 'ok'])
     
@@ -93,20 +86,19 @@ for name in working_ft + working_pt:
 
 generate_btn = st.sidebar.button("🚀 로테이션 자동 생성", use_container_width=True)
 
-# 3. 로테이션 엔진 (TO 시트 기반)
+# 3. 로테이션 엔진
 def run_rotation():
     display_times = [f"{h:02d}:00" for h in range(10, 22)]
-    all_staff = working_ft + working_pt
+    all_staff = list(dict.fromkeys([n for n in (working_ft + working_pt) if n.strip() != ""]))
+    if not all_staff: return pd.DataFrame()
+
     schedule_df = pd.DataFrame(index=display_times, columns=all_staff).fillna("-")
     last_positions = {name: "" for name in all_staff}
-    
-    # TO 시트에서 시간(첫 번째 열)을 제외한 나머지 컬럼들을 구역 리스트로 확보
     all_zones = [c for c in to_df.columns if c != to_df.columns[0]]
     
     for slot in display_times:
         hour = int(slot.split(":")[0])
         available_pool = []
-        
         for name in all_staff:
             s = combined_settings.get(name)
             if s and hour in s["range"]:
@@ -115,24 +107,16 @@ def run_rotation():
             else: schedule_df.at[slot, name] = " "
 
         random.shuffle(available_pool)
-        
-        # TO 시트에서 해당 시간 데이터 한 줄 추출
         current_to_row = to_df[to_df[to_df.columns[0]].str.contains(slot, na=False)]
         
         if not current_to_row.empty:
-            # 카운터 우선 순위 적용 (구역명에 '카운터' 포함 시 우선 배정)
             sorted_zones = sorted(all_zones, key=lambda x: "카운터" not in x)
-            
             for zone in sorted_zones:
-                try:
-                    needed = int(float(current_to_row[zone].iloc[0]))
-                except:
-                    needed = 0
-                
+                try: needed = int(float(current_to_row[zone].iloc[0]))
+                except: needed = 0
                 assigned = 0
-                # 카운터면 권한자만, 아니면 전체 필터링
                 eligible = [n for n in available_pool if not ("카운터" in zone and not combined_settings[n]["can_counter"])]
-                eligible.sort(key=lambda x: last_positions[x] == zone)
+                eligible.sort(key=lambda x: last_positions[name] == zone if name in last_positions else False) # 수정
 
                 for name in eligible:
                     if assigned < needed:
@@ -141,7 +125,6 @@ def run_rotation():
                         if name in available_pool: available_pool.remove(name)
                         assigned += 1
         
-        # 남은 인원 지원 배정
         for name in available_pool:
             schedule_df.at[slot, name] = "📢 지원"
             last_positions[name] = "📢 지원"
@@ -149,13 +132,15 @@ def run_rotation():
     return schedule_df
 
 if generate_btn:
-    st.session_state.result_df = run_rotation()
+    result = run_rotation()
+    if not result.empty: st.session_state.result_df = result
 
-if 'result_df' in st.session_state:
+if 'result_df' in st.session_state and not st.session_state.result_df.empty:
     st.write(f"### 📅 [{selected_store}] 로테이션 결과")
-    edited_df = st.data_editor(st.session_state.result_df, use_container_width=True, height=600)
+    display_df = st.session_state.result_df.copy()
+    edited_df = st.data_editor(display_df, use_container_width=True, height=600)
     
-    with st.expander("📊 배정 인원 실시간 체크 (TO 대비 현황)"):
+    with st.expander("📊 배정 인원 체크"):
         summary = []
         all_zones = [c for c in to_df.columns if c != to_df.columns[0]]
         for slot in edited_df.index:
@@ -170,4 +155,3 @@ if 'result_df' in st.session_state:
                 row[zone] = status
             summary.append(row)
         st.table(pd.DataFrame(summary))
-
