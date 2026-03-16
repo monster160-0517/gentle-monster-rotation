@@ -182,3 +182,42 @@ if 'result_df' in st.session_state and not st.session_state.result_df.empty:
     st.dataframe(status_board, use_container_width=True, height=500)
     
     st.info("💡 위 표는 [인원수/필수TO] 상태와 배정된 직원 이름을 동시에 보여줍니다.")
+if 'result_df' in st.session_state and not st.session_state.result_df.empty:
+    st.write("---")
+    st.subheader(f"📅 [{selected_store}] 최종 로테이션 결과")
+
+    # 1. 엑셀 저장 버튼 (캡처가 안 될 때를 대비한 백업)
+    csv = st.session_state.result_df.to_csv(index=True).encode('utf-8-sig')
+    st.download_button(
+        label="📥 결과 엑셀 파일로 저장 (클릭 시 즉시 다운로드)",
+        data=csv,
+        file_name=f"rotation_{selected_store}.csv",
+        mime='text/csv',
+        use_container_width=True
+    )
+
+    # 2. 캡처용 깔끔한 표 (수정 불가능한 보기 전용)
+    st.markdown("#### 📱 모바일/패드 캡처용 화면")
+    st.table(st.session_state.result_df) # data_editor보다 table이 캡처 시 훨씬 선명합니다.
+
+    # 3. 구역별 배치 현황판 (아까 요청하신 보드)
+    with st.expander("📊 구역 중심 현황판 (클릭하여 열기)"):
+        all_zones = [c for c in to_df.columns if c != to_df.columns[0]]
+        display_zones = all_zones + ["📢 지원", "🍴 식사"]
+        status_board = pd.DataFrame(index=display_zones, columns=st.session_state.result_df.index).fillna("")
+
+        for slot in st.session_state.result_df.index:
+            current_to_row = to_df[to_df[to_df.columns[0]].str.contains(slot, na=False)]
+            for zone in display_zones:
+                staff_list = st.session_state.result_df.columns[st.session_state.result_df.loc[slot] == zone].tolist()
+                staff_str = ", ".join(staff_list) if staff_list else "-"
+                if zone in all_zones:
+                    try: limit = int(float(current_to_row[zone].iloc[0]))
+                    except: limit = 0
+                    count = len(staff_list)
+                    icon = "✅" if count >= limit else "❌"
+                    status_board.at[zone, slot] = f"[{count}/{limit}] {icon} | {staff_str}"
+                else:
+                    status_board.at[zone, slot] = staff_str
+        
+        st.dataframe(status_board, use_container_width=True)
