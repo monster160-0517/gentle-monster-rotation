@@ -140,18 +140,45 @@ if 'result_df' in st.session_state and not st.session_state.result_df.empty:
     display_df = st.session_state.result_df.copy()
     edited_df = st.data_editor(display_df, use_container_width=True, height=600)
     
-    with st.expander("📊 배정 인원 체크"):
-        summary = []
-        all_zones = [c for c in to_df.columns if c != to_df.columns[0]]
-        for slot in edited_df.index:
-            row = {"시간": slot}
-            current_to_row = to_df[to_df[to_df.columns[0]].str.contains(slot, na=False)]
-            for zone in all_zones:
+   # ---------------------------------------------------------
+    # 📊 구역 중심 배정 현황판 (요청하신 구역=행, 시간=열 구조)
+    # ---------------------------------------------------------
+    st.write("---")
+    st.write("### 📍 구역별 배치 현황판")
+    
+    # 1. 현황판을 위한 데이터 구조 생성
+    all_zones = [c for c in to_df.columns if c != to_df.columns[0]]
+    # 특수 항목 추가
+    display_zones = all_zones + ["📢 지원", "🍴 식사"]
+    
+    # 빈 현황판 생성 (행: 구역, 열: 시간)
+    status_board = pd.DataFrame(index=display_zones, columns=edited_df.index).fillna("")
+
+    for slot in edited_df.index:
+        # 해당 시간대에 필요한 TO 가져오기
+        current_to_row = to_df[to_df[to_df.columns[0]].str.contains(slot, na=False)]
+        
+        for zone in display_zones:
+            # 1. 해당 시간/구역에 배정된 직원 명단 추출
+            staff_list = edited_df.columns[edited_df.loc[slot] == zone].tolist()
+            staff_str = ", ".join(staff_list) if staff_list else "-"
+            
+            # 2. TO 상태 확인 (일반 구역만)
+            if zone in all_zones:
                 try: limit = int(float(current_to_row[zone].iloc[0]))
                 except: limit = 0
-                count = (edited_df.loc[slot] == zone).sum()
-                status = f"{count}/{limit}"
-                if count < limit: status = f"❌ {status}"
-                row[zone] = status
-            summary.append(row)
-        st.table(pd.DataFrame(summary))
+                
+                count = len(staff_list)
+                # 상태 표시 (다 찼으면 ✅, 부족하면 ❌)
+                status_icon = "✅" if count >= limit else "❌"
+                if limit == 0 and count == 0: status_icon = "⚪" # 원래 0명인 경우
+                
+                status_board.at[zone, slot] = f"[{count}/{limit}] {status_icon}\n{staff_str}"
+            else:
+                # 지원이나 식사는 TO가 없으므로 명단만 표시
+                status_board.at[zone, slot] = staff_str
+
+    # 2. 현황판 출력
+    st.dataframe(status_board, use_container_width=True, height=500)
+    
+    st.info("💡 위 표는 [인원수/필수TO] 상태와 배정된 직원 이름을 동시에 보여줍니다.")
