@@ -131,31 +131,12 @@ if generate_btn:
     st.session_state.result_df = run_rotation()
 
 if 'result_df' in st.session_state and not st.session_state.result_df.empty:
-    st.write(f"### 📅 [{selected_store}] 로테이션 결과")
+    st.write("---")
+    st.subheader(f"📅 [{selected_store}] 로테이션 결과")
     
-    # 1. 수정용 에디터 (행: 시간, 열: 이름)
+    # 1. 수정용 에디터 (데이터 수정 시 하단 대시보드도 자동 반영됨)
     edited_df = st.data_editor(st.session_state.result_df, use_container_width=True, height=450)
 
-    # 2. 📱 모바일 공유용 대시보드 (행: 구역, 열: 시간)
+    # 2. 📸 모바일 공유용 대시보드 (행: 시간, 열: 이름 - 위와 동일한 구조)
     st.write("---")
-    st.markdown("### 📸 모바일 공유용 현황판 (구역별)")
-    all_zones = [c for c in to_df.columns if c != to_df.columns[0]]
-    display_zones = all_zones + ["📢 지원", "🍴 식사"]
-    capture_board = pd.DataFrame(index=display_zones, columns=edited_df.index).fillna("")
-
-    for slot in edited_df.index:
-        current_to_row = to_df[to_df[to_df.columns[0]].str.contains(slot, na=False)]
-        for zone in display_zones:
-            staff_list = edited_df.columns[edited_df.loc[slot] == zone].tolist()
-            staff_str = ", ".join(staff_list) if staff_list else "-"
-            
-            if zone in all_zones:
-                try: limit = int(float(current_to_row[zone].iloc[0]))
-                except: limit = 0
-                count = len(staff_list)
-                icon = "✅" if count >= limit else "⚠️"
-                capture_board.at[zone, slot] = f"{icon}({count}/{limit})\n{staff_str}"
-            else:
-                capture_board.at[zone, slot] = staff_str
-
-    st.table(capture_board)
+    st.markdown
