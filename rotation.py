@@ -5,12 +5,22 @@ import re
 
 # 1. 페이지 설정
 st.set_page_config(page_title="GM Manager Central", layout="wide")
-st.title("🕶️ GENTLE MONSTER 로테이션 시스템 v67.1")
+st.title("🕶️ GENTLE MONSTER 로테이션 시스템 v68.1")
 
-# 💡 구글 시트 정보 (공개 설정 필수)
-SHEET_ID = "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q"
-# [중요] '시간대별TO' 시트의 gid 숫자를 확인하여 여기에 넣으세요.
-TO_SHEET_GID = "2126973547" 
+# 🔗 [핵심] 매장별 구글 시트 ID 딕셔너리
+# 매장이 추가되면 아래에 "매장명": "시트ID" 형식으로 추가하세요.
+STORES = {
+    "하우스 도산": "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q",
+    "신사 플래그십": "1nqSbhCPnO1o_vRSubJCuLjbbZxmtRMjioTtA_ZzzNLc"
+}
+
+# 모든 매장 시트에서 '시간대별TO' 탭의 gid (사본 만들기를 했다면 동일함)
+TO_SHEET_GID = "2126973547"
+
+# --- 사이드바: 매장 선택 및 인원 설정 ---
+st.sidebar.header("🕹️ 컨트롤 패널")
+selected_store = st.sidebar.selectbox("🏠 담당 매장 선택", list(STORES.keys()))
+SHEET_ID = STORES[selected_store]
 
 @st.cache_data(ttl=1)
 def load_sheet_data(gid):
@@ -19,10 +29,10 @@ def load_sheet_data(gid):
         df = pd.read_csv(url, skip_blank_lines=True)
         if df.empty: return pd.DataFrame()
         df.columns = [str(c).strip() for c in df.columns]
+        # 데이터 클리닝: 소수점 제거 및 빈값 처리
         df = df.astype(str).replace(r'\.0$', '', regex=True).replace(['nan', 'None', 'nan.0'], '')
         return df
-    except Exception as e:
-        st.error(f"데이터 로드 실패 (GID: {gid}): {e}")
+    except:
         return pd.DataFrame()
 
 def parse_time_value(val):
@@ -33,44 +43,40 @@ def parse_time_value(val):
     except: return 0
 
 # 데이터 로드
-db_df = load_sheet_data("0")
-to_df = load_sheet_data(TO_SHEET_GID)
+db_df = load_sheet_data("0")          # 인원 정보
+to_df = load_sheet_data(TO_SHEET_GID) # 시간대별 TO
 
 if db_df.empty or to_df.empty:
-    st.warning("⚠️ 시트 데이터를 불러오는 중입니다. GID와 공유 설정을 확인해주세요.")
+    st.warning(f"⚠️ [{selected_store}] 데이터를 불러오지 못했습니다. 구글 시트의 [공유] 설정(링크가 있는 모든 사용자-뷰어)을 확인해주세요.")
     st.stop()
 
-# --- 사이드바 설정 ---
-st.sidebar.header("🕹️ 컨트롤 패널")
-db_df.rename(columns={db_df.columns[0]: '매장명'}, inplace=True)
-selected_store = st.sidebar.selectbox("🏠 담당 매장 선택", sorted(db_df['매장명'].unique()))
-store_data = db_df[db_df['매장명'] == selected_store].copy()
-
-# 조별 식사 시간 설정
-time_options = [f"{h:02d}:00" for h in range(11, 22)]
-group_labels = ["A", "B", "C", "D", "E"]
-lunch_slots, dinner_slots = {}, {}
-
-with st.sidebar.expander("🍴 조별 식사 시간 설정"):
-    for label in group_labels:
-        col1, col2 = st.columns(2)
-        with col1: lunch_slots[label] = st.selectbox(f"점심 {label}", time_options, index=group_labels.index(label)%len(time_options), key=f"L_{label}")
-        with col2: dinner_slots[label] = st.selectbox(f"저녁 {label}", time_options, index=(group_labels.index(label)+5)%len(time_options), key=f"D_{label}")
-
-# 인원 선택
+# 인원 추출 함수
 def extract_names(data, keyword):
     type_col = next((c for c in data.columns if '구분' in c), '구분')
     name_col = next((c for c in data.columns if '이름' in c), '이름')
     filtered = data[data[type_col].str.contains(keyword, na=False, case=False)]
     return [str(n).strip() for n in filtered[name_col].dropna().tolist() if n != '']
 
-working_ft = st.sidebar.multiselect("👤 정직원", extract_names(store_data, '정직'), default=extract_names(store_data, '정직'))
-working_pt = st.sidebar.multiselect("⏱️ 파트타이머", extract_names(store_data, '파트'), default=extract_names(store_data, '파트'))
+working_ft = st.sidebar.multiselect("👤 정직원", extract_names(db_df, '정직'), default=extract_names(db_df, '정직'))
+working_pt = st.sidebar.multiselect("⏱️ 파트타이머", extract_names(db_df, '파트'), default=extract_names(db_df, '파트'))
 
-# --- 데이터 전처리 ---
+# 식사 시간 설정
+time_options = [f"{h:02d}:00" for h in range(11, 22)]
+group_labels = ["A", "B", "C", "D", "E"]
+lunch_slots, dinner_slots = {}, {}
+with st.sidebar.expander("🍴 조별 식사 시간 설정"):
+    for label in group_labels:
+        c1, c2 = st.columns(2)
+        with c1: lunch_slots[label] = st.selectbox(f"점심 {label}", time_options, index=group_labels.index(label)%len(time_options), key=f"L_{label}")
+        with c2: dinner_slots[label] = st.selectbox(f"저녁 {label}", time_options, index=(group_labels.index(label)+5)%len(time_options), key=f"D_{label}")
+
+# 개인별 근무/식사/권한 설정 세팅
 combined_settings = {}
-for name in working_ft + working_pt:
-    r = store_data[store_data['이름'] == name].iloc[0] if not store_data[store_data['이름'] == name].empty else {}
+all_staff_selected = list(dict.fromkeys([n for n in (working_ft + working_pt) if n.strip() != ""]))
+
+for name in all_staff_selected:
+    match = db_df[db_df['이름'] == name]
+    r = match.iloc[0] if not match.empty else {}
     s_time = parse_time_value(r.get('출근시간', 11))
     e_time = parse_time_value(r.get('퇴근시간', 21))
     if 0 < e_time < 12 and e_time < s_time: e_time += 12
@@ -86,20 +92,18 @@ for name in working_ft + working_pt:
 
 generate_btn = st.sidebar.button("🚀 로테이션 자동 생성", use_container_width=True)
 
-# 3. 로테이션 엔진
+# --- 로테이션 엔진 (카운터 평준화 로직 포함) ---
 def run_rotation():
     display_times = [f"{h:02d}:00" for h in range(10, 22)]
-    all_staff = list(dict.fromkeys([n for n in (working_ft + working_pt) if n.strip() != ""]))
-    if not all_staff: return pd.DataFrame()
-
-    schedule_df = pd.DataFrame(index=display_times, columns=all_staff).fillna("-")
-    last_positions = {name: "" for name in all_staff}
+    schedule_df = pd.DataFrame(index=display_times, columns=all_staff_selected).fillna("-")
+    last_positions = {name: "" for name in all_staff_selected}
+    counter_counts = {name: 0 for name in all_staff_selected} # 카운터 횟수 카운트
     all_zones = [c for c in to_df.columns if c != to_df.columns[0]]
     
     for slot in display_times:
         hour = int(slot.split(":")[0])
         available_pool = []
-        for name in all_staff:
+        for name in all_staff_selected:
             s = combined_settings.get(name)
             if s and hour in s["range"]:
                 if slot in s["meals"]: schedule_df.at[slot, name] = "🍴 식사"
@@ -110,114 +114,72 @@ def run_rotation():
         current_to_row = to_df[to_df[to_df.columns[0]].str.contains(slot, na=False)]
         
         if not current_to_row.empty:
+            # 카운터 우선 순위 배정
             sorted_zones = sorted(all_zones, key=lambda x: "카운터" not in x)
             for zone in sorted_zones:
                 try: needed = int(float(current_to_row[zone].iloc[0]))
                 except: needed = 0
                 assigned = 0
+                
+                # 카운터 권한 필터링
                 eligible = [n for n in available_pool if not ("카운터" in zone and not combined_settings[n]["can_counter"])]
-                eligible.sort(key=lambda x: last_positions[name] == zone if name in last_positions else False) # 수정
+                
+                # 평준화 정렬: 1순위 카운터 적게 본 사람, 2순위 직전 구역 회피
+                if "카운터" in zone:
+                    eligible.sort(key=lambda x: (counter_counts[x], last_positions[x] == zone))
+                else:
+                    eligible.sort(key=lambda x: last_positions[x] == zone)
 
                 for name in eligible:
                     if assigned < needed:
                         schedule_df.at[slot, name] = zone
                         last_positions[name] = zone
+                        if "카운터" in zone: counter_counts[name] += 1
                         if name in available_pool: available_pool.remove(name)
                         assigned += 1
         
         for name in available_pool:
             schedule_df.at[slot, name] = "📢 지원"
             last_positions[name] = "📢 지원"
-            
     return schedule_df
 
+# --- 결과 출력 ---
 if generate_btn:
-    result = run_rotation()
-    if not result.empty: st.session_state.result_df = result
+    st.session_state.result_df = run_rotation()
 
 if 'result_df' in st.session_state and not st.session_state.result_df.empty:
     st.write(f"### 📅 [{selected_store}] 로테이션 결과")
-    display_df = st.session_state.result_df.copy()
-    edited_df = st.data_editor(display_df, use_container_width=True, height=600)
     
-   # ---------------------------------------------------------
-    # 📊 구역 중심 배정 현황판 (요청하신 구역=행, 시간=열 구조)
-    # ---------------------------------------------------------
+    # 엑셀 다운로드 버튼
+    csv = st.session_state.result_df.to_csv(index=True).encode('utf-8-sig')
+    st.download_button("📥 엑셀(CSV) 다운로드", csv, f"rotation_{selected_store}.csv", "text/csv", use_container_width=True)
+
+    # 메인 결과 표 (수정 가능)
+    edited_df = st.data_editor(st.session_state.result_df, use_container_width=True, height=500)
+    
+    # 하단 현황 보드 (구역=행, 시간=열) - 캡처용
     st.write("---")
-    st.write("### 📍 구역별 배치 현황판")
-    
-    # 1. 현황판을 위한 데이터 구조 생성
+    st.write("### 📍 구역별 배치 현황 (캡처용)")
     all_zones = [c for c in to_df.columns if c != to_df.columns[0]]
-    # 특수 항목 추가
     display_zones = all_zones + ["📢 지원", "🍴 식사"]
-    
-    # 빈 현황판 생성 (행: 구역, 열: 시간)
     status_board = pd.DataFrame(index=display_zones, columns=edited_df.index).fillna("")
 
     for slot in edited_df.index:
-        # 해당 시간대에 필요한 TO 가져오기
         current_to_row = to_df[to_df[to_df.columns[0]].str.contains(slot, na=False)]
-        
         for zone in display_zones:
-            # 1. 해당 시간/구역에 배정된 직원 명단 추출
             staff_list = edited_df.columns[edited_df.loc[slot] == zone].tolist()
             staff_str = ", ".join(staff_list) if staff_list else "-"
-            
-            # 2. TO 상태 확인 (일반 구역만)
             if zone in all_zones:
                 try: limit = int(float(current_to_row[zone].iloc[0]))
                 except: limit = 0
-                
-                count = len(staff_list)
-                # 상태 표시 (다 찼으면 ✅, 부족하면 ❌)
-                status_icon = "✅" if count >= limit else "❌"
-                if limit == 0 and count == 0: status_icon = "⚪" # 원래 0명인 경우
-                
-                status_board.at[zone, slot] = f"[{count}/{limit}] {status_icon}\n{staff_str}"
+                icon = "✅" if len(staff_list) >= limit else "❌"
+                status_board.at[zone, slot] = f"[{len(staff_list)}/{limit}] {icon} | {staff_str}"
             else:
-                # 지원이나 식사는 TO가 없으므로 명단만 표시
                 status_board.at[zone, slot] = staff_str
-
-    # 2. 현황판 출력
-    st.dataframe(status_board, use_container_width=True, height=500)
     
-    st.info("💡 위 표는 [인원수/필수TO] 상태와 배정된 직원 이름을 동시에 보여줍니다.")
-if 'result_df' in st.session_state and not st.session_state.result_df.empty:
-    st.write("---")
-    st.subheader(f"📅 [{selected_store}] 최종 로테이션 결과")
+    st.dataframe(status_board, use_container_width=True)
 
-    # 1. 엑셀 저장 버튼 (캡처가 안 될 때를 대비한 백업)
-    csv = st.session_state.result_df.to_csv(index=True).encode('utf-8-sig')
-    st.download_button(
-        label="📥 결과 엑셀 파일로 저장 (클릭 시 즉시 다운로드)",
-        data=csv,
-        file_name=f"rotation_{selected_store}.csv",
-        mime='text/csv',
-        use_container_width=True
-    )
-
-    # 2. 캡처용 깔끔한 표 (수정 불가능한 보기 전용)
-    st.markdown("#### 📱 모바일/패드 캡처용 화면")
-    st.table(st.session_state.result_df) # data_editor보다 table이 캡처 시 훨씬 선명합니다.
-
-    # 3. 구역별 배치 현황판 (아까 요청하신 보드)
-    with st.expander("📊 구역 중심 현황판 (클릭하여 열기)"):
-        all_zones = [c for c in to_df.columns if c != to_df.columns[0]]
-        display_zones = all_zones + ["📢 지원", "🍴 식사"]
-        status_board = pd.DataFrame(index=display_zones, columns=st.session_state.result_df.index).fillna("")
-
-        for slot in st.session_state.result_df.index:
-            current_to_row = to_df[to_df[to_df.columns[0]].str.contains(slot, na=False)]
-            for zone in display_zones:
-                staff_list = st.session_state.result_df.columns[st.session_state.result_df.loc[slot] == zone].tolist()
-                staff_str = ", ".join(staff_list) if staff_list else "-"
-                if zone in all_zones:
-                    try: limit = int(float(current_to_row[zone].iloc[0]))
-                    except: limit = 0
-                    count = len(staff_list)
-                    icon = "✅" if count >= limit else "❌"
-                    status_board.at[zone, slot] = f"[{count}/{limit}] {icon} | {staff_str}"
-                else:
-                    status_board.at[zone, slot] = staff_str
-        
-        st.dataframe(status_board, use_container_width=True)
+    # 카운터 평준화 데이터 확인용 요약
+    with st.expander("📊 직원별 카운터 누적 횟수 (균등 배분 체크)"):
+        summary = [{"이름": name, "카운터 횟수": (edited_df[name] == "카운터").sum()} for name in edited_df.columns]
+        st.table(pd.DataFrame(summary))
