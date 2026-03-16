@@ -8,8 +8,8 @@ st.title("🕶️ GENTLE MONSTER 로테이션 시스템 v69.1")
 
 # 🔗 매장별 구글 시트 ID 딕셔너리
 STORES = {
-    "하우스 도산": "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q",
-    "신사 플래그십": "1nqSbhCPnO1o_vRSubJCuLjbbZxmtRMjioTtA_ZzzNLc"
+    "하우스 서울": "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q",
+    "하우스 도산": "1nqSbhCPnO1o_vRSubJCuLjbbZxmtRMjioTtA_ZzzNLc"
 }
 
 TO_SHEET_GID = "2126973547"
