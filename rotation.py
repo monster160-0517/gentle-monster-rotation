@@ -149,46 +149,56 @@ if generate_btn:
 
 if 'result_df' in st.session_state and not st.session_state.result_df.empty:
     st.write("---")
-    st.subheader(f"📅 [{selected_store}] 로테이션 결과")
+    st.subheader(f"📅 [{selected_store}] 로테이션 생성 완료")
     
-    # 1. 엑셀 다운로드 & 결과 편집 (매니저용)
+    # 1. 관리자용 엑셀 저장 및 실시간 수정 창
     col_dl, col_edit = st.columns([1, 4])
     with col_dl:
         csv = st.session_state.result_df.to_csv(index=True).encode('utf-8-sig')
         st.download_button("📥 엑셀 저장", csv, f"rotation_{selected_store}.csv", "text/csv", use_container_width=True)
     
+    # 상단 표는 직원 중심 (수정용)
     edited_df = st.data_editor(st.session_state.result_df, use_container_width=True, height=400)
 
-    # 2. 📸 [캡처 전용] 구역 중심 대시보드
+    # 2. 📱 [핵심] 모바일 공유용 대시보드 (구역=행, 시간=열)
     st.write("---")
-    st.markdown("### 📱 모바일 공유 및 캡처용 보드")
+    st.markdown("### 📸 모바일 공유용 현황판 (구역별)")
     
+    # 구역 리스트 추출
     all_zones = [c for c in to_df.columns if c != to_df.columns[0]]
     display_zones = all_zones + ["📢 지원", "🍴 식사"]
     
-    # 캡처용 표 데이터 생성
+    # 현황판 데이터프레임 생성 (행: 구역, 열: 시간)
     capture_board = pd.DataFrame(index=display_zones, columns=edited_df.index).fillna("")
 
     for slot in edited_df.index:
         current_to_row = to_df[to_df[to_df.columns[0]].str.contains(slot, na=False)]
+        
         for zone in display_zones:
+            # 해당 시간/구역에 배정된 직원 찾기
             staff_list = edited_df.columns[edited_df.loc[slot] == zone].tolist()
             staff_str = ", ".join(staff_list) if staff_list else "-"
             
             if zone in all_zones:
-                try: limit = int(float(current_to_row[zone].iloc[0]))
-                except: limit = 0
+                try:
+                    limit = int(float(current_to_row[zone].iloc[0]))
+                except:
+                    limit = 0
                 count = len(staff_list)
-                # 캡처했을 때 예쁘게 보이도록 이모지 강조
-                icon = "✅" if count >= limit else "⚠️"
-                capture_board.at[zone, slot] = f"{icon} ({count}/{limit})\n{staff_str}"
+                
+                # 캡처 시 가독성을 위해 상태 이모지 추가
+                status = "✅" if count >= limit else "⚠️"
+                if limit == 0 and count == 0: status = "⚪"
+                
+                # [인원수/TO] 표시와 직원 이름을 줄바꿈하여 배치
+                capture_board.at[zone, slot] = f"{status}({count}/{limit})\n{staff_str}"
             else:
                 capture_board.at[zone, slot] = staff_str
 
-    # st.table은 스크롤 없이 화면에 표를 다 펼쳐서 보여주므로 캡처에 최적화되어 있습니다.
+    # st.table은 스크롤바 없이 모든 내용을 펼쳐서 보여주므로 캡처에 가장 적합합니다.
     st.table(capture_board)
 
-    # 3. 누적 통계
+    # 3. 누적 통계 (공정성 확인용)
     with st.expander("📊 직원별 카운터 누적 횟수"):
         summary = [{"이름": name, "카운터 횟수": (edited_df[name] == "카운터").sum()} for name in edited_df.columns]
         st.table(pd.DataFrame(summary))
