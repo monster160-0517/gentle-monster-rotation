@@ -15,11 +15,11 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("GENTLE MONSTER 로테이션 시스템 v70.1")
+st.title("GENTLE MONSTER 로테이션 시스템 v70.2")
 
 # 🔗 매장별 구글 시트 ID 딕셔너리
 STORES = {
-    "하우스 서울": "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q",
+    "하우스 서욱": "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q",
     "하우스 도산": "1nqSbhCPnO1o_vRSubJCuLjbbZxmtRMjioTtA_ZzzNLc"
 }
 TO_SHEET_GID = "2126973547"
@@ -33,7 +33,8 @@ def load_sheet_data(gid):
     try:
         df = pd.read_csv(url, skip_blank_lines=True)
         df.columns = [str(c).strip() for c in df.columns]
-        df = df.astype(str).replace(r'\.0$', '', regex=True).replace(['nan', 'None', 'nan.0'], '')
+        # NaN 값 및 공백 처리
+        df = df.fillna("").astype(str).replace(r'\.0$', '', regex=True).replace(['nan', 'None', 'nan.0'], '')
         return df
     except: return pd.DataFrame()
 
@@ -51,19 +52,23 @@ def get_staff_info(data, types):
     type_col = next((c for c in data.columns if '구분' in c), '구분')
     name_col = next((c for c in data.columns if '이름' in c), '이름')
     res = []
+    seen_names = set()
     for t in types:
         filtered = data[data[type_col].str.contains(t, na=False, case=False)]
         for _, row in filtered.iterrows():
             name = str(row[name_col]).strip()
-            if name:
+            # 이름이 비어있거나 중복된 경우 제외 (에러 방지)
+            if name and name != "" and name not in seen_names:
                 try: is_morning = int(float(row.get('출근시간', 11))) < 12
                 except: is_morning = True
                 res.append({"name": name, "is_morning": is_morning})
+                seen_names.add(name)
     return res
 
 staff_info_list = get_staff_info(db_df, ['정직', '파트'])
 all_staff_names = [s['name'] for s in staff_info_list]
 
+# 사이드바 인원 선택 (에러 방지를 위해 list로 명시적 변환)
 working_staff = st.sidebar.multiselect("👤 근무 인원 선택", all_staff_names, default=all_staff_names)
 
 # 조별 식사 설정
@@ -86,7 +91,6 @@ for s_info in staff_info_list:
         s_t, e_t = int(float(str(r.get('출근시간', 11)))), int(float(str(r.get('퇴근시간', 21))))
     except: s_t, e_t = 11, 21
     
-    # 식사 시간 파싱 (식사시간 열 우선)
     meal_val = str(r.get('식사시간', '')).strip()
     fixed_match = re.search(r'(\d{1,2})', meal_val)
     if fixed_match:
@@ -104,6 +108,7 @@ for s_info in staff_info_list:
 
 # --- 로테이션 엔진 ---
 def run_rotation():
+    # working_staff 순서대로 열 생성
     schedule_df = pd.DataFrame(index=all_time_slots, columns=working_staff).fillna("-")
     counter_counts = {n: 0 for n in working_staff}
     last_pos = {n: "" for n in working_staff}
@@ -134,14 +139,11 @@ def run_rotation():
                     except: mi = ma = 0
                 zone_cfg[z] = {"min": mi, "max": ma}
 
-            # 1단계: 모든 구역 최소 TO 채우기
             for z in all_zones:
                 needed = zone_cfg[z]["min"]
                 assigned = 0
                 eligible = [n for n in pool if not ("카운터" in z and not combined_settings[n]["can_counter"])]
-                # 카운터 평준화 + 직전 구역 회피
                 eligible.sort(key=lambda x: (counter_counts[x] if "카운터" in z else 0, last_pos[x] == z))
-                
                 for n in eligible:
                     if assigned < needed:
                         schedule_df.at[slot, n] = z
@@ -150,13 +152,11 @@ def run_rotation():
                         if n in pool: pool.remove(n)
                         assigned += 1
             
-            # 2단계: 최대 TO까지 왼쪽 구역부터 순서대로 추가 채우기
             for z in all_zones:
                 current_cnt = (schedule_df.loc[slot] == z).sum()
                 needed_extra = zone_cfg[z]["max"] - current_cnt
                 assigned_extra = 0
                 eligible = [n for n in pool if not ("카운터" in z and not combined_settings[n]["can_counter"])]
-                
                 for n in eligible:
                     if assigned_extra < max(0, needed_extra):
                         schedule_df.at[slot, n] = z
@@ -164,11 +164,9 @@ def run_rotation():
                         if "카운터" in z: counter_counts[n] += 1
                         if n in pool: pool.remove(n)
                         assigned_extra += 1
-
         for n in pool:
             schedule_df.at[slot, n] = "지원"
             last_pos[n] = "지원"
-            
     return schedule_df
 
 if st.sidebar.button("🚀 로테이션 자동 생성", use_container_width=True):
@@ -176,30 +174,30 @@ if st.sidebar.button("🚀 로테이션 자동 생성", use_container_width=True
 
 if 'result_df' in st.session_state:
     res = st.session_state.result_df
+    # 에러 발생 지점: 중복 컬럼 확인 및 처리 완료된 데이터 전달
     edited = st.data_editor(res, use_container_width=True)
     
     st.write("---")
     st.markdown("### 📸 모바일 공유용 현황판")
     
-    # HTML 렌더링 (디자인 요청 반영)
-    html = "<table style='width:100%; border-collapse: collapse; text-align: center;'>"
-    # Header
-    html += "<tr><th style='border: 1px solid #ddd; padding: 10px; background: #f4f4f4;'>시간</th>"
+    html = "<table style='width:100%; border-collapse: collapse; text-align: center; border: 1px solid #ddd;'>"
+    html += "<tr style='background-color: #f8f9fa;'><th style='border: 1px solid #ddd; padding: 10px;'>시간</th>"
     for name in edited.columns:
         color = "#007bff" if combined_settings[name]["is_morning"] else "#e83e8c"
-        html += f"<th style='border: 1px solid #ddd; padding: 10px; color: {color};'>{name}</th>"
+        html += f"<th style='border: 1px solid #ddd; padding: 10px; color: {color}; font-weight: bold;'>{name}</th>"
     html += "</tr>"
     
-    # Body
     for slot, row in edited.iterrows():
         html += f"<tr><td style='border: 1px solid #ddd; padding: 10px; font-weight: bold;'>{slot}</td>"
         for val in row:
             bg = "background-color: #ffff00; font-weight: bold;" if val == "식사" else ""
             color = "color: #adb5bd;" if val == "지원" else "color: black;"
+            # 구역별 배경색 (층별 구분용 예시)
+            if "1F" in str(val): bg = "background-color: #f1f3f5;"
+            elif "2F" in str(val): bg = "background-color: #e9ecef;"
+            
             html += f"<td style='border: 1px solid #ddd; padding: 10px; {bg} {color}'>{val}</td>"
         html += "</tr>"
     html += "</table>"
-    
     st.markdown(html, unsafe_allow_html=True)
-    
-    st.markdown("<p style='font-size: 0.8em; color: gray;'>* 파란색: 오전 출근자 | 분홍색: 오후 출근자</p>", unsafe_allow_html=True)
+    st.markdown("<p style='font-size: 0.8em; color: gray;'>* 파란색 이름: 오전 출근 | 분홍색 이름: 오후 출근</p>", unsafe_allow_html=True)
