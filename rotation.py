@@ -17,8 +17,8 @@ st.title("GENTLE MONSTER 로테이션 시스템 v71.1")
 
 # 🔗 매장 및 시트 설정 (테스트 매장 추가됨)
 STORES = {
-    "하우스 도산": "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q",
-    "신사 플래그십": "1nqSbhCPnO1o_vRSubJCuLjbbZxmtRMjioTtA_ZzzNLc",
+    "하우스 서울": "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q",
+    "하우스 도산": "1nqSbhCPnO1o_vRSubJCuLjbbZxmtRMjioTtA_ZzzNLc",
     "테스트": "1qZp0-8sqjLN65gbLPObPDYVzNDuWZiPlik6FJAM3MWY"
 }
 TO_SHEET_GID = "2126973547"
