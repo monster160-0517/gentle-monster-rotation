@@ -9,12 +9,10 @@ st.set_page_config(page_title="GM Manager Central", layout="wide")
 st.markdown("""
     <style>
     .meal-bg { background-color: #ffff00 !important; color: black !important; font-weight: bold; }
-    .status-ok { color: #28a745; font-weight: bold; }
-    .status-warn { color: #dc3545; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("GENTLE MONSTER 로테이션 시스템 v70.4")
+st.title("GENTLE MONSTER 로테이션 시스템 v70.5")
 
 # 🔗 매장 및 시트 설정
 STORES = {
@@ -45,72 +43,83 @@ if db_df.empty or to_df.empty:
 
 all_time_slots = [f"{h:02d}:00" for h in range(11, 21)]
 
-# 인원 정보 파싱 함수
-def get_staff_info(data, types):
+def format_time(val):
+    """'13', '13:00' 등을 '13:00'으로 통일"""
+    nums = re.sub(r'[^0-9]', '', str(val))
+    if nums:
+        hour = int(nums[:2])
+        return f"{hour:02d}:00"
+    return None
+
+def get_staff_info(data):
     type_col = next((c for c in data.columns if '구분' in c), '구분')
     name_col = next((c for c in data.columns if '이름' in c), '이름')
     res, seen = [], set()
-    for t in types:
-        filtered = data[data[type_col].str.contains(t, na=False, case=False)]
-        for _, row in filtered.iterrows():
-            name = str(row[name_col]).strip()
-            if name and name not in seen:
-                try: is_morning = int(float(row.get('출근시간', 11))) < 12
-                except: is_morning = True
-                res.append({"name": name, "is_morning": is_morning, "type": t})
-                seen.add(name)
+    for _, row in data.iterrows():
+        name = str(row[name_col]).strip()
+        stype = str(row[type_col]).strip()
+        if name and name not in seen and (stype in ['정직', '파트']):
+            try: is_morning = int(float(row.get('출근시간', 11))) < 12
+            except: is_morning = True
+            
+            # 식사 시간 파싱
+            meals = []
+            if '정직' in stype:
+                m1 = format_time(row.get('점심조', ''))
+                m2 = format_time(row.get('저녁조', ''))
+                if m1: meals.append(m1)
+                if m2: meals.append(m2)
+            else: # 파트
+                pm = format_time(row.get('식사시간', ''))
+                if pm: meals.append(pm)
+                
+            res.append({
+                "name": name, 
+                "is_morning": is_morning, 
+                "type": stype,
+                "default_meals": meals,
+                "range": range(int(float(row.get('출근시간', 11))), int(float(row.get('퇴근시간', 21)))),
+                "can_counter": any(x in str(row.get('카운터여부', 'X')).lower() for x in ['o', 'y', '1', 'v', '예'])
+            })
+            seen.add(name)
     return res
 
-# 전체 인원 데이터 로드
-all_staff_data = get_staff_info(db_df, ['정직', '파트'])
+all_staff_data = get_staff_info(db_df)
 
-# --- 사이드바: 파트타이머만 선택 ---
-st.sidebar.header("🕹️ 인원 관리")
-ft_names = [s['name'] for s in all_staff_data if '정직' in s['type']]
-pt_names = [s['name'] for s in all_staff_data if '파트' in s['type']]
+# --- 사이드바 ---
+st.sidebar.header("🕹️ 인원 및 식사 관리")
+ft_data = [s for s in all_staff_data if '정직' in s['type']]
+pt_data = [s for s in all_staff_data if '파트' in s['type']]
 
-selected_pt = st.sidebar.multiselect("⏱️ 오늘 출근 파트타이머", pt_names, default=pt_names)
+# 1. 파트타이머 출근 선택
+selected_pt_names = st.sidebar.multiselect("⏱️ 오늘 출근 파트타이머", [s['name'] for s in pt_data], default=[s['name'] for s in pt_data])
 
-# 최종 근무 인원 확정 (정직원 전원 + 선택된 파트타이머)
-working_staff_names = ft_names + selected_pt
-working_staff_info = [s for s in all_staff_data if s['name'] in working_staff_names]
+# 2. 파트타이머 식사 시간 조정 (선택된 인원만 표시)
+pt_meal_overrides = {}
+if selected_pt_names:
+    with st.sidebar.expander("🍴 파트타이머 식사 조정"):
+        for name in selected_pt_names:
+            p_info = next(s for s in pt_data if s['name'] == name)
+            default_val = p_info['default_meals'][0] if p_info['default_meals'] else all_time_slots[2]
+            # 인덱스 안전 처리
+            try: d_idx = all_time_slots.index(default_val)
+            except: d_idx = 2
+            new_meal = st.selectbox(f"{name} 식사", all_time_slots, index=d_idx, key=f"pt_meal_{name}")
+            pt_meal_overrides[name] = [new_meal]
 
-# 조별 식사 설정
-group_labels = ["A", "B", "C", "D", "E"]
-lunch_slots, dinner_slots = {}, {}
-with st.sidebar.expander("🍴 정직원 조별 식사 설정"):
-    for label in group_labels:
-        c1, c2 = st.columns(2)
-        with c1: lunch_slots[label] = st.selectbox(f"점심 {label}", all_time_slots, index=group_labels.index(label)%len(all_time_slots), key=f"L_{label}")
-        with c2: dinner_slots[label] = st.selectbox(f"저녁 {label}", all_time_slots, index=(group_labels.index(label)+4)%len(all_time_slots), key=f"D_{label}")
+# 최종 근무 인원 세팅
+working_staff_info = []
+for s in all_staff_data:
+    if '정직' in s['type'] or s['name'] in selected_pt_names:
+        if s['name'] in pt_meal_overrides:
+            s['meals'] = pt_meal_overrides[s['name']]
+        else:
+            s['meals'] = s['default_meals']
+        working_staff_info.append(s)
 
-# 개인별 세팅 구축
-combined_settings = {}
-for s_info in working_staff_info:
-    name = s_info['name']
-    match = db_df[db_df['이름'] == name]
-    r = match.iloc[0] if not match.empty else {}
-    
-    try: s_t, e_t = int(float(str(r.get('출근시간', 11)))), int(float(str(r.get('퇴근시간', 21))))
-    except: s_t, e_t = 11, 21
-    
-    # 식사 시간 (H열 '식사시간' 우선, 없으면 조별 설정)
-    meal_val = str(r.get('식사시간', '')).strip()
-    fixed_match = re.search(r'(\d{1,2})', meal_val)
-    if fixed_match:
-        my_meals = [f"{int(fixed_match.group(1)):02d}:00"]
-    else:
-        l_g, d_g = str(r.get('점심조', 'A')).strip().upper(), str(r.get('저녁조', 'A')).strip().upper()
-        my_meals = [lunch_slots.get(l_g), dinner_slots.get(d_g)]
-        
-    combined_settings[name] = {
-        "range": range(s_t, e_t),
-        "meals": [m for m in my_meals if m],
-        "is_morning": s_info['is_morning'],
-        "can_counter": any(x in str(r.get('카운터여부', 'X')).lower() for x in ['o', 'y', '1', 'v', '예'])
-    }
+working_staff_names = [s['name'] for s in working_staff_info]
 
-# --- 로테이션 엔진 (v70.3과 동일) ---
+# --- 로테이션 엔진 ---
 def run_rotation():
     schedule_df = pd.DataFrame(index=all_time_slots, columns=working_staff_names).fillna("-")
     counter_counts = {n: 0 for n in working_staff_names}
@@ -120,12 +129,12 @@ def run_rotation():
     for slot in all_time_slots:
         hr = int(slot.split(":")[0])
         pool = []
-        for n in working_staff_names:
-            s = combined_settings.get(n)
-            if s and hr in s["range"]:
-                if slot in s["meals"]: schedule_df.at[slot, n] = "식사"
-                else: pool.append(n)
-            else: schedule_df.at[slot, n] = " "
+        for s in working_staff_info:
+            if hr in s["range"]:
+                if slot in s["meals"]: schedule_df.at[slot, s['name']] = "식사"
+                else: pool.append(s['name'])
+            else: schedule_df.at[slot, s['name']] = " "
+        
         random.shuffle(pool)
         to_row = to_df[to_df[to_df.columns[0]].str.contains(slot, na=False)]
         
@@ -139,7 +148,7 @@ def run_rotation():
             for z in all_zones:
                 needed = zone_cfg[z]["min"]
                 assigned = 0
-                eligible = [n for n in pool if not ("카운터" in z and not combined_settings[n]["can_counter"])]
+                eligible = [n for n in pool if not ("카운터" in z and not next(s for s in working_staff_info if s['name']==n)["can_counter"])]
                 eligible.sort(key=lambda x: (counter_counts[x] if "카운터" in z else 0, last_pos[x] == z))
                 for n in eligible:
                     if assigned < needed:
@@ -152,7 +161,7 @@ def run_rotation():
                 current_cnt = (schedule_df.loc[slot] == z).sum()
                 needed_extra = zone_cfg[z]["max"] - current_cnt
                 assigned_extra = 0
-                eligible = [n for n in pool if not ("카운터" in z and not combined_settings[n]["can_counter"])]
+                eligible = [n for n in pool if not ("카운터" in z and not next(s for s in working_staff_info if s['name']==n)["can_counter"])]
                 for n in eligible:
                     if assigned_extra < max(0, needed_extra):
                         schedule_df.at[slot, n] = z
@@ -165,7 +174,7 @@ def run_rotation():
 if st.sidebar.button("🚀 로테이션 자동 생성", use_container_width=True):
     st.session_state.result_df = run_rotation()
 
-# --- 결과 출력 ---
+# --- 화면 출력 (현황판 + TO 준수 대시보드) ---
 if 'result_df' in st.session_state:
     res = st.session_state.result_df
     edited = st.data_editor(res, use_container_width=True)
@@ -175,7 +184,8 @@ if 'result_df' in st.session_state:
     html = "<table style='width:100%; border-collapse: collapse; text-align: center; border: 1px solid #ddd;'>"
     html += "<tr style='background-color: #f8f9fa;'><th style='border: 1px solid #ddd; padding: 10px;'>시간</th>"
     for name in edited.columns:
-        color = "#007bff" if combined_settings[name]["is_morning"] else "#e83e8c"
+        s_info = next(s for s in working_staff_info if s['name'] == name)
+        color = "#007bff" if s_info["is_morning"] else "#e83e8c"
         html += f"<th style='border: 1px solid #ddd; padding: 10px; color: {color};'>{name}</th>"
     html += "</tr>"
     for slot, row in edited.iterrows():
@@ -187,7 +197,6 @@ if 'result_df' in st.session_state:
     html += "</table>"
     st.markdown(html, unsafe_allow_html=True)
 
-    # 📊 구역별 TO 준수 현황
     st.write("---")
     st.markdown("### 📊 구역별 TO 준수 현황")
     all_zones = [c for c in to_df.columns if c != to_df.columns[0]]
