@@ -6,21 +6,20 @@ import re
 # 1. 페이지 설정
 st.set_page_config(page_title="GM Manager Central", layout="wide")
 
-# CSS: 식사(노란 배경), 모바일 캡처 가독성 향상
+# CSS 설정
 st.markdown("""
     <style>
     .meal-bg { background-color: #ffff00 !important; color: black !important; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("GENTLE MONSTER 로테이션 시스템 v71.0")
+st.title("GENTLE MONSTER 로테이션 시스템 v71.1")
 
-# 🔗 매장 및 시트 설정
+# 🔗 매장 및 시트 설정 (테스트 매장 추가됨)
 STORES = {
-    "하우스 서울": "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q",
-    "하우스 도산": "1nqSbhCPnO1o_vRSubJCuLjbbZxmtRMjioTtA_ZzzNLc"
+    "하우스 도산": "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q",
+    "신사 플래그십": "1nqSbhCPnO1o_vRSubJCuLjbbZxmtRMjioTtA_ZzzNLc",
     "테스트": "1qZp0-8sqjLN65gbLPObPDYVzNDuWZiPlik6FJAM3MWY"
-
 }
 TO_SHEET_GID = "2126973547"
 
@@ -43,7 +42,7 @@ db_df = load_sheet_data("0")
 to_df = load_sheet_data(TO_SHEET_GID)
 
 if db_df.empty:
-    st.error("⚠️ 데이터를 불러올 수 없습니다. 공유 설정을 확인하세요.")
+    st.error("⚠️ 데이터를 불러올 수 없습니다. 시트 주소나 공유 설정을 확인하세요.")
     st.stop()
 
 # 운영 시간 설정
@@ -72,7 +71,6 @@ def get_staff_info(data):
                 e_hr = int(e_val.split(':')[0]) if e_val else 21
             except: s_hr, e_hr = 11, 21
             
-            # 식사 시간 인식 (이미지 기준: 점심, 저녁, 식사시간)
             meals = [get_clean_time(row.get(c, '')) for c in ['점심', '저녁', '식사시간']]
             res.append({
                 "name": name, 
@@ -120,7 +118,7 @@ def run_rotation():
                 mi, ma = (map(int, raw.split('-')) if '-' in raw else (int(float(raw or 0)), int(float(raw or 0))))
                 zone_cfg[z] = {"min": mi, "max": ma}
 
-            for z in all_zones: # 1단계: 최소 TO 채우기
+            for z in all_zones: # 1단계: 최소 TO
                 needed = zone_cfg[z]["min"]
                 assigned = 0
                 eligible = [n for n in pool if not ("카운터" in z and not next(s for s in working_staff_info if s['name']==n)["can_counter"])]
@@ -131,7 +129,7 @@ def run_rotation():
                         if "카운터" in z: counter_counts[n] += 1
                         if n in pool: pool.remove(n)
                         assigned += 1
-            for z in all_zones: # 2단계: 최대 TO 채우기
+            for z in all_zones: # 2단계: 최대 TO
                 curr = (schedule_df.loc[slot] == z).sum()
                 needed_extra = zone_cfg[z]["max"] - curr
                 assigned_extra = 0
@@ -152,14 +150,12 @@ if 'result_df' in st.session_state:
     res = st.session_state.result_df
     st.write(f"### 📅 [{selected_store}] 로테이션 결과")
     
-    # [핵심] 사용자가 직접 수정할 수 있는 에디터
-    # edited_df 변수에 수정된 값이 담기며, 하단 캡처용 표는 이 변수를 참조합니다.
+    # 수정 가능한 에디터
     edited_df = st.data_editor(res, use_container_width=True, height=450)
     
     st.write("---")
-    st.markdown("### 📸 모바일 공유용 현황판 (수정 내용 반영됨)")
+    st.markdown("### 📸 모바일 공유용 현황판")
     
-    # 캡처용 HTML 표 (수정된 edited_df를 사용하여 생성)
     html = "<table style='width:100%; border-collapse: collapse; text-align: center; border: 1px solid #ddd;'>"
     html += "<tr style='background-color: #f8f9fa;'><th style='border: 1px solid #ddd; padding: 10px;'>시간</th>"
     for name in edited_df.columns:
