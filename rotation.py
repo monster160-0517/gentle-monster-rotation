@@ -17,18 +17,41 @@ st.title("GENTLE MONSTER 로테이션 시스템 v71.4")
 
 # 🔗 매장 및 시트 설정
 STORES = {
-    "하우스 서울": {"ID": "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q", "TO_GID": "2126973547"},
-    "하우스 도산": {"ID": "1nqSbhCPnO1o_vRSubJCuLjbbZxmtRMjioTtA_ZzzNLc", "TO_GID": "2126973547"},
-    "테스트": {"ID": "1qZp0-8sqjLN65gbLPObPDYVzNDuWZiPlik6FJAM3MWY", "TO_GID": "2126973547"}
+    "하우스 서울": {
+        "ID": "19CvEiqbhPqNpz2KzcBQh7vVaH40O_ZuR6MFYdw98c5Q",
+        "DAY_TYPES": {
+            "평일": {"DB_GID": "738722894", "TO_GID": "410487706"},
+            "주말": {"DB_GID": "0", "TO_GID": "2126973547"},
+        },
+    },
+    "하우스 도산": {
+        "ID": "1nqSbhCPnO1o_vRSubJCuLjbbZxmtRMjioTtA_ZzzNLc",
+        "DAY_TYPES": {
+            "평일": {"DB_GID": "0", "TO_GID": "2126973547"},
+            "주말": {"DB_GID": "0", "TO_GID": "2126973547"},
+        },
+    },
+    "테스트": {
+        "ID": "1qZp0-8sqjLN65gbLPObPDYVzNDuWZiPlik6FJAM3MWY",
+        "DAY_TYPES": {
+            "평일": {"DB_GID": "0", "TO_GID": "2126973547"},
+            "주말": {"DB_GID": "0", "TO_GID": "2126973547"},
+        },
+    },
 }
 
 selected_store = st.sidebar.selectbox("🏠 담당 매장 선택", list(STORES.keys()))
-SHEET_ID = STORES[selected_store]["ID"]
-TO_SHEET_GID = STORES[selected_store]["TO_GID"]
+selected_day_type = st.sidebar.radio("📅 운영 구분", ["평일", "주말"], horizontal=True)
+
+store_config = STORES[selected_store]
+SHEET_ID = store_config["ID"]
+day_type_config = store_config["DAY_TYPES"][selected_day_type]
+DB_SHEET_GID = day_type_config["DB_GID"]
+TO_SHEET_GID = day_type_config["TO_GID"]
 
 @st.cache_data(ttl=1)
-def load_sheet_data(gid):
-    url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={gid}"
+def load_sheet_data(sheet_id, gid):
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
     try:
         df = pd.read_csv(url, skip_blank_lines=True, dtype=str)
         df.columns = [str(c).strip() for c in df.columns]
@@ -38,8 +61,8 @@ def load_sheet_data(gid):
         st.error(f"시트 로딩 실패: {e}")
         return pd.DataFrame()
 
-db_df = load_sheet_data("0")
-to_df = load_sheet_data(TO_SHEET_GID)
+db_df = load_sheet_data(SHEET_ID, DB_SHEET_GID)
+to_df = load_sheet_data(SHEET_ID, TO_SHEET_GID)
 
 if db_df.empty: st.stop()
 
@@ -157,6 +180,7 @@ pt_input_defaults = {
 pt_input_signature = json.dumps(
     {
         "store": selected_store,
+        "day_type": selected_day_type,
         "defaults": pt_input_defaults,
     },
     ensure_ascii=False,
@@ -217,6 +241,7 @@ if selected_pt_names:
 config_signature = json.dumps(
     {
         "store": selected_store,
+        "day_type": selected_day_type,
         "staff": [
             {
                 "name": s["display_name"],
@@ -307,7 +332,7 @@ if st.sidebar.button("🚀 로테이션 자동 생성", use_container_width=True
 # --- 화면 출력 ---
 if 'result_df' in st.session_state:
     res = st.session_state.result_df
-    st.write(f"### 📅 [{selected_store}] 로테이션")
+    st.write(f"### 📅 [{selected_store} / {selected_day_type}] 로테이션")
     edited_df = st.data_editor(res, use_container_width=True, height=450)
     
     st.write("---")
