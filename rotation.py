@@ -145,6 +145,31 @@ raw_staff = get_initial_staff(db_df)
 # --- 사이드바: 파트타이머 상세 조정 ---
 st.sidebar.header("🕹️ 인원 관리")
 pt_list = [s for s in raw_staff if s['type'] == '파트']
+
+pt_input_defaults = {
+    s["original_name"]: {
+        "in": s["in"] or "11:00",
+        "out": s["out"] or "21:00",
+        "meal": s["meal_p"] or "12:00",
+    }
+    for s in pt_list
+}
+pt_input_signature = json.dumps(
+    {
+        "store": selected_store,
+        "defaults": pt_input_defaults,
+    },
+    ensure_ascii=False,
+    sort_keys=True,
+)
+
+if st.session_state.get("pt_input_signature") != pt_input_signature:
+    for pt_name, defaults in pt_input_defaults.items():
+        st.session_state[f"in_{pt_name}"] = defaults["in"]
+        st.session_state[f"out_{pt_name}"] = defaults["out"]
+        st.session_state[f"meal_{pt_name}"] = defaults["meal"]
+    st.session_state["pt_input_signature"] = pt_input_signature
+
 selected_pt_names = st.sidebar.multiselect("⏱️ 출근 파트타이머 선택", [s['original_name'] for s in pt_list], default=[s['original_name'] for s in pt_list])
 
 final_staff_configs = []
@@ -170,9 +195,9 @@ if selected_pt_names:
         pt_origin = next(s for s in pt_list if s['original_name'] == pt_name)
         with st.sidebar.expander(f"👤 {pt_name}"):
             c1, c2 = st.columns(2)
-            new_in = c1.text_input(f"출근", value=pt_origin['in'] or "11:00", key=f"in_{pt_name}")
-            new_out = c2.text_input(f"퇴근", value=pt_origin['out'] or "21:00", key=f"out_{pt_name}")
-            new_meal = st.text_input(f"식사", value=pt_origin['meal_p'] or "12:00", key=f"meal_{pt_name}")
+            new_in = c1.text_input(f"출근", key=f"in_{pt_name}")
+            new_out = c2.text_input(f"퇴근", key=f"out_{pt_name}")
+            new_meal = st.text_input(f"식사", key=f"meal_{pt_name}")
 
             pt_copy = pt_origin.copy()
             work_range, in_hr, out_hr = build_work_range(new_in, new_out)
