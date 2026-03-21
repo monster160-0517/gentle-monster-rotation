@@ -89,25 +89,33 @@ def get_zone_priority(zone_name):
         return 2
     return 1
 
-def pick_best_staff(zone_name, pool, staff_lookup, zone_category_counts, previous_assignments):
+def pick_best_staff(zone_name, pool, previous_assignments):
     if not pool:
         return None
 
-    random.shuffle(pool)
-    category = get_zone_category(zone_name)
+    candidates = list(pool)
+    random.shuffle(candidates)
+
+    if is_support_zone(zone_name):
+        non_support_last = [
+            name for name in candidates
+            if not is_support_zone(previous_assignments.get(name))
+        ]
+        if non_support_last:
+            candidates = non_support_last
+    else:
+        from_support_last = [
+            name for name in candidates
+            if is_support_zone(previous_assignments.get(name))
+        ]
+        if from_support_last:
+            candidates = from_support_last
 
     non_consecutive = [
-        name for name in pool if previous_assignments.get(name) != zone_name
+        name for name in candidates if previous_assignments.get(name) != zone_name
     ]
-    candidates = non_consecutive if non_consecutive else list(pool)
-
-    candidates.sort(
-        key=lambda name: (
-            zone_category_counts[name].get(category, 0),
-            sum(zone_category_counts[name].values()),
-            name,
-        )
-    )
+    if non_consecutive:
+        candidates = non_consecutive
 
     return candidates[0] if candidates else None
 
@@ -210,15 +218,8 @@ def run_rotation():
     all_time_slots = [f"{h:02d}:00" for h in range(11, 21)]
     schedule_df = pd.DataFrame(index=all_time_slots, columns=working_names).fillna("-")
     all_zones = [c for c in to_df.columns if c != to_df.columns[0]]
-    
-    f1_zones = [z for z in all_zones if any(kw in z for kw in ['1F', '1층'])]
-    f2_zones = [z for z in all_zones if any(kw in z for kw in ['2F', '2층'])]
-    
+
     staff_lookup = {s['display_name']: s for s in final_staff_configs}
-    zone_category_counts = {
-        n: {"counter": 0, "1f": 0, "2f": 0, "other": 0}
-        for n in working_names
-    }
     previous_assignments = {n: None for n in working_names}
 
     for slot in all_time_slots:
@@ -248,15 +249,12 @@ def run_rotation():
                     chosen = pick_best_staff(
                         z,
                         eligible,
-                        staff_lookup,
-                        zone_category_counts,
                         previous_assignments,
                     )
                     if not chosen:
                         break
 
                     schedule_df.at[slot, chosen] = z
-                    zone_category_counts[chosen][get_zone_category(z)] += 1
                     previous_assignments[chosen] = z
                     assigned += 1
                     pool.remove(chosen)
@@ -274,7 +272,6 @@ def run_rotation():
                     support_zone = "2층 지원" if support_zone == "1층 지원" else "1층 지원"
 
                 schedule_df.at[slot, n] = support_zone
-                zone_category_counts[n][get_zone_category(support_zone)] += 1
                 previous_assignments[n] = support_zone
                 pool.remove(n)
     return schedule_df
