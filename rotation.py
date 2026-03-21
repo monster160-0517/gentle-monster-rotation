@@ -3,6 +3,8 @@ import pandas as pd
 import random
 import re
 import json
+from datetime import date
+from io import BytesIO
 
 # 1. 페이지 설정
 st.set_page_config(page_title="GM Manager Central", layout="wide")
@@ -334,6 +336,19 @@ if 'result_df' in st.session_state:
     res = st.session_state.result_df
     st.write(f"### 📅 [{selected_store} / {selected_day_type}] 로테이션")
     edited_df = st.data_editor(res, use_container_width=True, height=450)
+    csv_bytes = res.to_csv(index=True).encode('utf-8')
+    file_name = f"rotation_{selected_store}_{selected_day_type}_{date.today():%Y%m%d}"
+    st.download_button("📥 현재 배정 다운로드 (CSV)", data=csv_bytes, file_name=f"{file_name}.csv", mime="text/csv")
+    with BytesIO() as buf:
+        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            res.to_excel(writer, index=True, sheet_name="rotation")
+        buf.seek(0)
+        st.download_button(
+            "📥 현재 배정 다운로드 (Excel)",
+            data=buf.getvalue(),
+            file_name=f"{file_name}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
     
     st.write("---")
     st.markdown("### 📸 모바일 공유용 현황판")
