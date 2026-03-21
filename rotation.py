@@ -89,7 +89,7 @@ def build_work_range(in_val, out_val, default_in=11, default_out=21):
 
 def is_counter_zone(zone_name):
     zone = str(zone_name).upper()
-    return "카운터" in zone or "COUNTER" in zone or "1F-C" in zone
+    return "카운터" in zone or "COUNTER" in zone or "1F-C" in zone or "2F-C" in zone
 
 def is_support_zone(zone_name):
     zone = str(zone_name)
