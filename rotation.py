@@ -438,18 +438,12 @@ if 'result_df' in st.session_state:
     edited_df = st.data_editor(display_df_with_name, use_container_width=True, height=450, column_config=column_settings)
     csv_bytes = display_df_with_name.to_csv(index=True).encode('utf-8')
     file_name = f"rotation_{selected_store}_{selected_day_type}_{date.today():%Y%m%d}"
-    st.download_button("📥 현재 배정 다운로드 (CSV)", data=csv_bytes, file_name=f"{file_name}.csv", mime="text/csv")
     with BytesIO() as buf:
         with pd.ExcelWriter(buf, engine="openpyxl") as writer:
             display_df_with_name.to_excel(writer, index=True, sheet_name="rotation")
         buf.seek(0)
-        st.download_button(
-            "📥 현재 배정 다운로드 (Excel)",
-            data=buf.getvalue(),
-            file_name=f"{file_name}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-    
+        excel_bytes = buf.getvalue()
+
     st.write("---")
     st.markdown("### 📸 모바일 공유용 현황판")
     def get_staff_color(name):
@@ -533,3 +527,12 @@ if 'result_df' in st.session_state:
     st.write("---")
     st.markdown("### 📸 모바일 공유용 현황판")
     components.html(widget_html, height=110)
+    st.write("---")
+    st.markdown("### 📥 다운로드")
+    st.download_button("📥 현재 배정 다운로드 (CSV)", data=csv_bytes, file_name=f"{file_name}.csv", mime="text/csv")
+    st.download_button(
+        "📥 현재 배정 다운로드 (Excel)",
+        data=excel_bytes,
+        file_name=f"{file_name}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
