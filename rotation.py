@@ -16,7 +16,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("GENTLE MONSTER 로테이션 시스템 v71.4")
+st.title("GENTLE MONSTER 플로어 스케쥴")
 
 # 🔗 매장 및 시트 설정
 STORES = {
