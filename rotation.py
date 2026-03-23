@@ -108,6 +108,29 @@ def get_zone_category(zone_name):
         return "1f"
     return "other"
 
+def get_floor_bucket(zone_name):
+    if not zone_name:
+        return None
+    zone = str(zone_name)
+    upper = zone.upper()
+    if "1층" in zone or "1F" in upper:
+        return "1f"
+    if "2층" in zone or "2F" in upper:
+        return "2f"
+    if "카운터" in zone or "COUNTER" in upper:
+        # default to whichever floor indicator is included
+        if "2" in zone:
+            return "2f"
+        if "1" in zone:
+            return "1f"
+        return "counter"
+    if "지원" in zone:
+        if "2" in zone:
+            return "2f"
+        if "1" in zone:
+            return "1f"
+    return None
+
 def get_zone_priority(zone_name):
     if is_counter_zone(zone_name):
         return 0
@@ -274,14 +297,41 @@ def run_rotation():
 
     staff_lookup = {s['display_name']: s for s in final_staff_configs}
     previous_assignments = {n: None for n in working_names}
+    floor_state = {n: {"floor": None, "count": 0} for n in working_names}
+
+    def update_floor_state(name, zone):
+        floor = get_floor_bucket(zone)
+        state = floor_state[name]
+        if not floor:
+            state["floor"] = None
+            state["count"] = 0
+            return
+        if state["floor"] == floor:
+            state["count"] += 1
+        else:
+            state["floor"] = floor
+            state["count"] = 1
+
+    def can_assign_same_floor(name, floor):
+        if not floor:
+            return True
+        state = floor_state[name]
+        return not (state["floor"] == floor and state["count"] >= 2)
 
     for slot in all_time_slots:
         hr = int(slot.split(":")[0])
         pool = []
         for s in final_staff_configs:
-            if slot in s["meals"]: schedule_df.at[slot, s['display_name']] = "식사"
-            elif hr in s["work_range"]: pool.append(s['display_name'])
-            else: schedule_df.at[slot, s['display_name']] = " "
+            if slot in s["meals"]:
+                schedule_df.at[slot, s['display_name']] = "식사"
+                floor_state[s['display_name']]['floor'] = None
+                floor_state[s['display_name']]['count'] = 0
+            elif hr in s["work_range"]:
+                pool.append(s['display_name'])
+            else:
+                schedule_df.at[slot, s['display_name']] = " "
+                floor_state[s['display_name']]['floor'] = None
+                floor_state[s['display_name']]['count'] = 0
         
         random.shuffle(pool)
         to_row = to_df[to_df[to_df.columns[0]].str.contains(slot, na=False)]
@@ -299,9 +349,12 @@ def run_rotation():
                         n for n in pool
                         if not (is_counter_zone(z) and not staff_lookup[n]["can_counter"])
                     ]
+                    zone_floor = get_floor_bucket(z)
+                    floor_filtered = [n for n in eligible if can_assign_same_floor(n, zone_floor)]
+                    working_candidates = floor_filtered or eligible
                     chosen = pick_best_staff(
                         z,
-                        eligible,
+                        working_candidates,
                         previous_assignments,
                     )
                     if not chosen:
@@ -311,6 +364,7 @@ def run_rotation():
                     previous_assignments[chosen] = z
                     assigned += 1
                     pool.remove(chosen)
+                    update_floor_state(chosen, z)
 
             for n in list(pool): # 층별 균등 지원 배정
                 current_assignments = [
@@ -327,6 +381,7 @@ def run_rotation():
                 schedule_df.at[slot, n] = support_zone
                 previous_assignments[n] = support_zone
                 pool.remove(n)
+                update_floor_state(n, support_zone)
     return schedule_df
 
 if st.sidebar.button("🚀 로테이션 자동 생성", use_container_width=True):
