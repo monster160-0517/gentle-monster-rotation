@@ -386,6 +386,12 @@ if 'result_df' in st.session_state:
     page_html += "</body></html>"
 
     b64 = base64.b64encode(page_html.encode('utf-8')).decode('ascii')
-    open_js = f"window.open('data:text/html;base64,{b64}', '_blank');"
-    st.markdown(f"<button style='border:0; padding:10px 16px; font-weight:600; background:#111827; color:#fff; border-radius:8px; cursor:pointer; margin-bottom:8px;' onclick=\"{open_js}\">🖥️ 크게 보기</button>", unsafe_allow_html=True)
+    link = f"data:text/html;base64,{b64}"
+    st.markdown(
+        f"<a href='{link}' target='_blank' rel='noopener noreferrer'>"
+        "<button style='border:0; padding:10px 16px; font-weight:600; background:#111827; color:#fff; "
+        "border-radius:8px; cursor:pointer; margin-bottom:8px;'>🖥️ 크게 보기</button>"
+        "</a>",
+        unsafe_allow_html=True,
+    )
     st.markdown(table_html, unsafe_allow_html=True)
