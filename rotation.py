@@ -343,7 +343,7 @@ if 'result_df' in st.session_state:
     st.download_button("📥 현재 배정 다운로드 (CSV)", data=csv_bytes, file_name=f"{file_name}.csv", mime="text/csv")
     with BytesIO() as buf:
         with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        display_df.to_excel(writer, index=True, sheet_name="rotation")
+            display_df.to_excel(writer, index=True, sheet_name="rotation")
         buf.seek(0)
         st.download_button(
             "📥 현재 배정 다운로드 (Excel)",
