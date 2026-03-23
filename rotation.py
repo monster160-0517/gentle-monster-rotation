@@ -359,7 +359,22 @@ if 'result_df' in st.session_state:
     st.markdown("### 📸 모바일 공유용 현황판")
     def get_staff_color(name):
         s_info = next((s for s in final_staff_configs if s['display_name'] == name), None)
-        return "#007bff" if s_info and s_info["type"] == '정직' and s_info["in"] <= "10:00" else "#e83e8c"
+        if not s_info:
+            return "#111827"
+        if s_info["type"] == '정직':
+            return "#2563eb"
+        return "#059669"
+
+    def get_zone_background(value):
+        text = str(value)
+        low = text.lower()
+        if "카운터" in low or "counter" in low:
+            return "#ede9fe"
+        if "2층" in low or "2f" in low:
+            return "#fee2e2"
+        if "1층" in low or "1f" in low:
+            return "#dbeafe"
+        return ""
 
     def build_table(df):
         table_html = "<table style='width:100%; border-collapse: collapse; text-align: center; border: 1px solid #ddd;'>"
@@ -371,7 +386,13 @@ if 'result_df' in st.session_state:
             color = get_staff_color(staff)
             table_html += f"<tr><td style='border: 1px solid #ddd; padding: 8px; font-weight: bold; color: {color};'>{staff}</td>"
             for col, val in row.items():
-                bg = "background-color: #ffff00;" if val == "식사" else ""
+                bg = ""
+                if str(val) == "식사":
+                    bg = "background-color: #fff5ba;"
+                else:
+                    zone_color = get_zone_background(val)
+                    if zone_color:
+                        bg = f"background-color: {zone_color};"
                 extra_style = f" color: {color};" if col == "직원명" else ""
                 table_html += f"<td style='border: 1px solid #ddd; padding: 8px; {bg}{extra_style}'>{val}</td>"
             table_html += "</tr>"
