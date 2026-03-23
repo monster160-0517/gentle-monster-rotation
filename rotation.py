@@ -1,6 +1,5 @@
 import streamlit as st
 import streamlit.components.v1 as components
-from streamlit import column_config
 import pandas as pd
 import random
 import re
@@ -348,9 +347,9 @@ if 'result_df' in st.session_state:
     zone_choices = sorted(zone_choices)
     column_settings = {
         col: (
-            column_config.Dropdown(options=zone_choices)
+            st.column_config.SelectboxColumn(options=zone_choices)
             if col != "직원명"
-            else column_config.TextColumn(label="직원명", disabled=True)
+            else st.column_config.TextColumn(label="직원명", disabled=True)
         )
         for col in display_df_with_name.columns
     }
