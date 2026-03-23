@@ -405,10 +405,19 @@ if 'result_df' in st.session_state:
 
     table_html = build_table(edited_df)
     page_html = "<!doctype html><html lang='ko'><head><meta charset='utf-8'/><title>모바일 공유 현황판</title>"
-    page_html += "<style>body{font-family: 'Pretendard', 'Noto Sans KR', sans-serif; background:#fff; margin:0; padding:30px;} table{font-size:1rem; width:100%;} td,th{text-align:center;} h1{margin-bottom:20px;}</style>"
-    page_html += "</head><body><h1>모바일 공유 현황판</h1>"
+    page_html += (
+        "<style>"
+        "html,body{height:100%;margin:0;padding:0;background:#fff;font-family:'Pretendard','Noto Sans KR',sans-serif;}"
+        ".page-wrap{display:flex;flex-direction:column;height:100%;padding:16px;box-sizing:border-box;}"
+        "h1{margin:0 0 12px;font-size:1.4rem;}"
+        ".table-container{flex:1;overflow:hidden;border:1px solid #ddd;border-radius:12px;}"
+        "table{width:100%;height:100%;border-collapse:collapse;font-size:0.95rem;}"
+        "th,td{border:1px solid #ddd;padding:6px;text-align:center;vertical-align:middle;}"
+        "</style>"
+    )
+    page_html += "</head><body><div class='page-wrap'><h1>모바일 공유 현황판</h1><div class='table-container'>"
     page_html += table_html
-    page_html += "</body></html>"
+    page_html += "</div></div></body></html>"
 
     widget_html = f"""
     <div style='margin-bottom:8px;'>
