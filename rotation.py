@@ -340,7 +340,20 @@ if 'result_df' in st.session_state:
     display_df.index.name = "직원명"
     display_df_with_name = display_df.copy()
     display_df_with_name["직원명"] = display_df_with_name.index
-    edited_df = st.data_editor(display_df_with_name, use_container_width=True, height=450)
+    zone_columns = [c for c in to_df.columns if c != to_df.columns[0]]
+    zone_choices = set(zone_columns)
+    zone_choices.update(str(val).strip() for val in display_df.values.flatten() if str(val).strip())
+    zone_choices.update(["식사", "1층 지원", "2층 지원", "-", ""])
+    zone_choices = sorted(zone_choices)
+    column_config = {
+        col: (
+            st.column_config.Dropdown(options=zone_choices)
+            if col != "직원명"
+            else st.column_config.TextColumn(label="직원명", disabled=True)
+        )
+        for col in display_df_with_name.columns
+    }
+    edited_df = st.data_editor(display_df_with_name, use_container_width=True, height=450, column_config=column_config)
     csv_bytes = display_df_with_name.to_csv(index=True).encode('utf-8')
     file_name = f"rotation_{selected_store}_{selected_day_type}_{date.today():%Y%m%d}"
     st.download_button("📥 현재 배정 다운로드 (CSV)", data=csv_bytes, file_name=f"{file_name}.csv", mime="text/csv")
