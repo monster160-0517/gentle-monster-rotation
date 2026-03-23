@@ -361,8 +361,12 @@ if 'result_df' in st.session_state:
         s_info = next((s for s in final_staff_configs if s['display_name'] == name), None)
         if not s_info:
             return "#111827"
-        if s_info["type"] == '정직':
+        if "(A조)" in name:
+            return "#f97316"
+        if "(B조)" in name:
             return "#2563eb"
+        if s_info["type"] == '정직':
+            return "#1d4ed8"
         return "#059669"
 
     def get_zone_background(value):
