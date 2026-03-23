@@ -503,4 +503,11 @@ if 'result_df' in st.session_state:
     </script>
     """
     components.html(widget_html, height=110)
+    st.write("---")
+    st.markdown("### 📊 데스크탑 컬러 현황판")
+    st.markdown(table_html, unsafe_allow_html=True)
+
+    st.write("---")
+    st.markdown("### 📸 모바일 공유용 현황판")
+    components.html(widget_html, height=110)
     st.markdown(table_html, unsafe_allow_html=True)
