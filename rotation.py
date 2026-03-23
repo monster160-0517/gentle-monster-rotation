@@ -390,34 +390,6 @@ if st.sidebar.button("🚀 로테이션 자동 생성", use_container_width=True
 # --- 화면 출력 ---
 if 'result_df' in st.session_state:
     res = st.session_state.result_df
-    header_html = f"""
-    <div class="rotation-header">
-      <span class="rotation-kicker">현장 배정</span>
-      <h2>[{selected_store} / {selected_day_type}] 로테이션</h2>
-    </div>
-    <style>
-      .rotation-header {{
-        padding: 18px 22px;
-        border-radius: 20px;
-        background: linear-gradient(135deg, #1d4ed8, #2563eb);
-        color: #fff;
-        box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
-        margin-bottom: 16px;
-      }}
-      .rotation-header h2 {{
-        margin: 4px 0 0;
-        font-size: 1.6rem;
-        font-weight: 700;
-      }}
-      .rotation-header .rotation-kicker {{
-        font-size: 0.85rem;
-        letter-spacing: 0.3em;
-        text-transform: uppercase;
-        color: rgba(255,255,255,0.8);
-      }}
-    </style>
-    """
-    st.markdown(header_html, unsafe_allow_html=True)
     display_df = res.transpose()
     display_df.index.name = "직원명"
     display_df_with_name = display_df.copy()
