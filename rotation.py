@@ -337,13 +337,15 @@ if 'result_df' in st.session_state:
     st.write(f"### 📅 [{selected_store} / {selected_day_type}] 로테이션")
     display_df = res.transpose()
     display_df.index.name = "직원명"
-    edited_df = st.data_editor(display_df, use_container_width=True, height=450)
-    csv_bytes = display_df.to_csv(index=True).encode('utf-8')
+    display_df_with_name = display_df.copy()
+    display_df_with_name["직원명"] = display_df_with_name.index
+    edited_df = st.data_editor(display_df_with_name, use_container_width=True, height=450)
+    csv_bytes = display_df_with_name.to_csv(index=True).encode('utf-8')
     file_name = f"rotation_{selected_store}_{selected_day_type}_{date.today():%Y%m%d}"
     st.download_button("📥 현재 배정 다운로드 (CSV)", data=csv_bytes, file_name=f"{file_name}.csv", mime="text/csv")
     with BytesIO() as buf:
         with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            display_df.to_excel(writer, index=True, sheet_name="rotation")
+            display_df_with_name.to_excel(writer, index=True, sheet_name="rotation")
         buf.seek(0)
         st.download_button(
             "📥 현재 배정 다운로드 (Excel)",
