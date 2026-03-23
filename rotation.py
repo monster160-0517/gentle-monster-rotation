@@ -5,6 +5,7 @@ import re
 import json
 from datetime import date
 from io import BytesIO
+import base64
 
 # 1. 페이지 설정
 st.set_page_config(page_title="GM Manager Central", layout="wide")
@@ -356,18 +357,35 @@ if 'result_df' in st.session_state:
     
     st.write("---")
     st.markdown("### 📸 모바일 공유용 현황판")
-    html = "<table style='width:100%; border-collapse: collapse; text-align: center; border: 1px solid #ddd;'>"
-    html += "<tr style='background-color: #f8f9fa;'><th style='border: 1px solid #ddd; padding: 10px;'>직원</th>"
-    for time in edited_df.columns:
-        html += f"<th style='border: 1px solid #ddd; padding: 10px; font-weight: bold;'>{time}</th>"
-    html += "</tr>"
-    for staff, row in edited_df.iterrows():
-        s_info = next((s for s in final_staff_configs if s['display_name'] == staff), None)
-        color = "#007bff" if s_info and s_info["type"] == '정직' and s_info["in"] <= "10:00" else "#e83e8c"
-        html += f"<tr><td style='border: 1px solid #ddd; padding: 8px; font-weight: bold; color: {color};'>{staff}</td>"
-        for val in row:
-            bg = "background-color: #ffff00;" if val == "식사" else ""
-            html += f"<td style='border: 1px solid #ddd; padding: 8px; {bg}'>{val}</td>"
-        html += "</tr>"
-    html += "</table>"
-    st.markdown(html, unsafe_allow_html=True)
+    def get_staff_color(name):
+        s_info = next((s for s in final_staff_configs if s['display_name'] == name), None)
+        return "#007bff" if s_info and s_info["type"] == '정직' and s_info["in"] <= "10:00" else "#e83e8c"
+
+    def build_table(df):
+        table_html = "<table style='width:100%; border-collapse: collapse; text-align: center; border: 1px solid #ddd;'>"
+        table_html += "<tr style='background-color: #f8f9fa;'><th style='border: 1px solid #ddd; padding: 10px;'>직원</th>"
+        for time in df.columns:
+            table_html += f"<th style='border: 1px solid #ddd; padding: 10px; font-weight: bold;'>{time}</th>"
+        table_html += "</tr>"
+        for staff, row in df.iterrows():
+            color = get_staff_color(staff)
+            table_html += f"<tr><td style='border: 1px solid #ddd; padding: 8px; font-weight: bold; color: {color};'>{staff}</td>"
+            for col, val in row.items():
+                bg = "background-color: #ffff00;" if val == "식사" else ""
+                extra_style = f" color: {color};" if col == "직원명" else ""
+                table_html += f"<td style='border: 1px solid #ddd; padding: 8px; {bg}{extra_style}'>{val}</td>"
+            table_html += "</tr>"
+        table_html += "</table>"
+        return table_html
+
+    table_html = build_table(edited_df)
+    page_html = "<!doctype html><html lang='ko'><head><meta charset='utf-8'/><title>모바일 공유 현황판</title>"
+    page_html += "<style>body{font-family: 'Pretendard', 'Noto Sans KR', sans-serif; background:#fff; margin:0; padding:30px;} table{font-size:1rem; width:100%;} td,th{text-align:center;} h1{margin-bottom:20px;}</style>"
+    page_html += "</head><body><h1>모바일 공유 현황판</h1>"
+    page_html += table_html
+    page_html += "</body></html>"
+
+    b64 = base64.b64encode(page_html.encode('utf-8')).decode('ascii')
+    open_js = f"window.open('data:text/html;base64,{b64}', '_blank');"
+    st.markdown(f"<button style='border:0; padding:10px 16px; font-weight:600; background:#111827; color:#fff; border-radius:8px; cursor:pointer; margin-bottom:8px;' onclick=\"{open_js}\">🖥️ 크게 보기</button>", unsafe_allow_html=True)
+    st.markdown(table_html, unsafe_allow_html=True)
