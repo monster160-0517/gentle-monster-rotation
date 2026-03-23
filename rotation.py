@@ -335,13 +335,15 @@ if st.sidebar.button("🚀 로테이션 자동 생성", use_container_width=True
 if 'result_df' in st.session_state:
     res = st.session_state.result_df
     st.write(f"### 📅 [{selected_store} / {selected_day_type}] 로테이션")
-    edited_df = st.data_editor(res, use_container_width=True, height=450)
-    csv_bytes = res.to_csv(index=True).encode('utf-8')
+    display_df = res.transpose()
+    display_df.index.name = "직원명"
+    edited_df = st.data_editor(display_df, use_container_width=True, height=450)
+    csv_bytes = display_df.to_csv(index=True).encode('utf-8')
     file_name = f"rotation_{selected_store}_{selected_day_type}_{date.today():%Y%m%d}"
     st.download_button("📥 현재 배정 다운로드 (CSV)", data=csv_bytes, file_name=f"{file_name}.csv", mime="text/csv")
     with BytesIO() as buf:
         with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            res.to_excel(writer, index=True, sheet_name="rotation")
+        display_df.to_excel(writer, index=True, sheet_name="rotation")
         buf.seek(0)
         st.download_button(
             "📥 현재 배정 다운로드 (Excel)",
@@ -353,14 +355,14 @@ if 'result_df' in st.session_state:
     st.write("---")
     st.markdown("### 📸 모바일 공유용 현황판")
     html = "<table style='width:100%; border-collapse: collapse; text-align: center; border: 1px solid #ddd;'>"
-    html += "<tr style='background-color: #f8f9fa;'><th style='border: 1px solid #ddd; padding: 10px;'>시간</th>"
-    for name in edited_df.columns:
-        s_info = next((s for s in final_staff_configs if s['display_name'] == name), None)
-        color = "#007bff" if s_info and s_info["type"] == '정직' and s_info["in"] <= "10:00" else "#e83e8c"
-        html += f"<th style='border: 1px solid #ddd; padding: 10px; color: {color}; font-weight: bold;'>{name}</th>"
+    html += "<tr style='background-color: #f8f9fa;'><th style='border: 1px solid #ddd; padding: 10px;'>직원</th>"
+    for time in edited_df.columns:
+        html += f"<th style='border: 1px solid #ddd; padding: 10px; font-weight: bold;'>{time}</th>"
     html += "</tr>"
-    for slot, row in edited_df.iterrows():
-        html += f"<tr><td style='border: 1px solid #ddd; padding: 8px; font-weight: bold;'>{slot}</td>"
+    for staff, row in edited_df.iterrows():
+        s_info = next((s for s in final_staff_configs if s['display_name'] == staff), None)
+        color = "#007bff" if s_info and s_info["type"] == '정직' and s_info["in"] <= "10:00" else "#e83e8c"
+        html += f"<tr><td style='border: 1px solid #ddd; padding: 8px; font-weight: bold; color: {color};'>{staff}</td>"
         for val in row:
             bg = "background-color: #ffff00;" if val == "식사" else ""
             html += f"<td style='border: 1px solid #ddd; padding: 8px; {bg}'>{val}</td>"
