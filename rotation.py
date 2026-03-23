@@ -1,11 +1,11 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import random
 import re
 import json
 from datetime import date
 from io import BytesIO
-import base64
 
 # 1. 페이지 설정
 st.set_page_config(page_title="GM Manager Central", layout="wide")
@@ -385,13 +385,20 @@ if 'result_df' in st.session_state:
     page_html += table_html
     page_html += "</body></html>"
 
-    b64 = base64.b64encode(page_html.encode('utf-8')).decode('ascii')
-    link = f"data:text/html;base64,{b64}"
-    st.markdown(
-        f"<a href='{link}' target='_blank' rel='noopener noreferrer'>"
-        "<button style='border:0; padding:10px 16px; font-weight:600; background:#111827; color:#fff; "
-        "border-radius:8px; cursor:pointer; margin-bottom:8px;'>🖥️ 크게 보기</button>"
-        "</a>",
-        unsafe_allow_html=True,
-    )
+    widget_html = f"""
+    <div style='margin-bottom:8px;'>
+        <button style='border:0; padding:10px 16px; font-weight:600; background:#111827; color:#fff; border-radius:8px; cursor:pointer;'
+                onclick='openLargeRotation()'>🖥️ 크게 보기</button>
+    </div>
+    <script>
+    const largeRotationContent = {json.dumps(page_html)};
+    function openLargeRotation() {{
+        const win = window.open('', '_blank');
+        if (!win) return;
+        win.document.write(largeRotationContent);
+        win.document.close();
+    }}
+    </script>
+    """
+    components.html(widget_html, height=110)
     st.markdown(table_html, unsafe_allow_html=True)
