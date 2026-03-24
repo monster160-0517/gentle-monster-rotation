@@ -96,14 +96,16 @@ def is_counter_zone(zone_name):
     zone = str(zone_name).upper()
     return "카운터" in zone or "COUNTER" in zone or "1F-C" in zone or "2F-C" in zone
 
-def is_support_zone(zone_name):
+def is_flexible_zone(zone_name):
     zone = str(zone_name)
-    return "지원" in zone
+    return "유동" in zone
 
 def get_zone_category(zone_name):
     zone = str(zone_name).upper()
     if is_counter_zone(zone_name):
         return "counter"
+    if is_flexible_zone(zone_name):
+        return "flex"
     if "2F" in zone or "2층" in zone:
         return "2f"
     if "1F" in zone or "1층" in zone:
@@ -126,7 +128,7 @@ def get_floor_bucket(zone_name):
         if "1" in zone:
             return "1f"
         return "counter"
-    if "지원" in zone:
+    if "유동" in zone:
         if "2" in zone:
             return "2f"
         if "1" in zone:
@@ -136,7 +138,7 @@ def get_floor_bucket(zone_name):
 def get_zone_priority(zone_name):
     if is_counter_zone(zone_name):
         return 0
-    if is_support_zone(zone_name):
+    if is_flexible_zone(zone_name):
         return 2
     return 1
 
@@ -156,20 +158,20 @@ def pick_best_staff(zone_name, pool, previous_assignments):
     candidates = list(pool)
     random.shuffle(candidates)
 
-    if is_support_zone(zone_name):
-        non_support_last = [
+    if is_flexible_zone(zone_name):
+        non_flexible_last = [
             name for name in candidates
-            if not is_support_zone(previous_assignments.get(name))
+            if not is_flexible_zone(previous_assignments.get(name))
         ]
-        if non_support_last:
-            candidates = non_support_last
+        if non_flexible_last:
+            candidates = non_flexible_last
     else:
-        from_support_last = [
+        from_flexible_last = [
             name for name in candidates
-            if is_support_zone(previous_assignments.get(name))
+            if is_flexible_zone(previous_assignments.get(name))
         ]
-        if from_support_last:
-            candidates = from_support_last
+        if from_flexible_last:
+            candidates = from_flexible_last
 
     non_consecutive = [
         name for name in candidates if previous_assignments.get(name) != zone_name
@@ -197,7 +199,7 @@ def get_initial_staff(data):
                 "meal2": get_clean_time(row.get('저녁', '')),
                 "meal_p": get_clean_time(row.get('식사시간', '')),
                 "can_counter": is_enabled_flag(row.get('카운터여부', 'X')),
-                "can_support": is_enabled_flag(row.get('지원여부', 'X')),
+                "can_flexible": is_enabled_flag(row.get('유동여부', 'X')),
             })
     return res
 
@@ -288,7 +290,7 @@ config_signature = json.dumps(
                 "out": s.get("out"),
                 "meals": s.get("meals", []),
                 "can_counter": s.get("can_counter", False),
-                "can_support": s.get("can_support", False),
+                "can_flexible": s.get("can_flexible", False),
             }
             for s in final_staff_configs
         ],
@@ -361,7 +363,7 @@ def run_rotation():
                     eligible = [
                         n for n in pool
                         if not (is_counter_zone(z) and not staff_lookup[n]["can_counter"])
-                        and not (is_support_zone(z) and not staff_lookup[n]["can_support"])
+                        and not (is_flexible_zone(z) and not staff_lookup[n]["can_flexible"])
                     ]
                     zone_floor = get_floor_bucket(z)
                     floor_filtered = [n for n in eligible if can_assign_same_floor(n, zone_floor)]
@@ -380,26 +382,26 @@ def run_rotation():
                     pool.remove(chosen)
                     update_floor_state(chosen, z)
 
-            support_pool = [n for n in pool if staff_lookup[n]["can_support"]]
-            unsupported_pool = [n for n in pool if not staff_lookup[n]["can_support"]]
+            flexible_pool = [n for n in pool if staff_lookup[n]["can_flexible"]]
+            inflexible_pool = [n for n in pool if not staff_lookup[n]["can_flexible"]]
 
-            for n in support_pool: # 층별 균등 지원 배정
+            for n in flexible_pool: # 층별 균등 유동 배정
                 current_assignments = [
                     val for val in schedule_df.loc[slot].tolist()
                     if str(val).strip() not in ["-", "", " ", "식사"]
                 ]
                 f1_cnt = sum(1 for val in current_assignments if get_zone_category(val) == "1f")
                 f2_cnt = sum(1 for val in current_assignments if get_zone_category(val) == "2f")
-                support_zone = "1층 지원" if f1_cnt <= f2_cnt else "2층 지원"
+                flexible_zone = "1층 유동" if f1_cnt <= f2_cnt else "2층 유동"
 
-                if previous_assignments.get(n) == support_zone:
-                    support_zone = "2층 지원" if support_zone == "1층 지원" else "1층 지원"
+                if previous_assignments.get(n) == flexible_zone:
+                    flexible_zone = "2층 유동" if flexible_zone == "1층 유동" else "1층 유동"
 
-                schedule_df.at[slot, n] = support_zone
-                previous_assignments[n] = support_zone
-                update_floor_state(n, support_zone)
+                schedule_df.at[slot, n] = flexible_zone
+                previous_assignments[n] = flexible_zone
+                update_floor_state(n, flexible_zone)
 
-            for n in unsupported_pool:
+            for n in inflexible_pool:
                 schedule_df.at[slot, n] = "-"
                 previous_assignments[n] = None
                 floor_state[n]["floor"] = None
@@ -420,7 +422,7 @@ if 'result_df' in st.session_state:
     zone_columns = [c for c in to_df.columns if c != to_df.columns[0]]
     zone_choices = set(zone_columns)
     zone_choices.update(str(val).strip() for val in display_df.values.flatten() if str(val).strip())
-    zone_choices.update(["식사", "1층 지원", "2층 지원", "-", ""])
+    zone_choices.update(["식사", "1층 유동", "2층 유동", "-", ""])
     zone_choices = sorted(zone_choices)
     column_settings = {
         col: (
