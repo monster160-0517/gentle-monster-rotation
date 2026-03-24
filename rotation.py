@@ -6,6 +6,7 @@ import re
 import json
 from datetime import date
 from io import BytesIO
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 # 1. 페이지 설정
 st.set_page_config(page_title="GM Manager Central", layout="wide")
@@ -16,7 +17,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("GENTLE MONSTER 플로어 스케쥴")
+st.title("GENTLE MONSTER 로테이션 시스템 v71.4")
 
 # 🔗 매장 및 시트 설정
 STORES = {
@@ -392,8 +393,8 @@ if 'result_df' in st.session_state:
     res = st.session_state.result_df
     display_df = res.transpose()
     display_df.index.name = "직원명"
-    display_df_with_name = display_df.copy()
-    display_df_with_name["직원명"] = display_df_with_name.index
+    editor_df = display_df.reset_index()
+    editor_df = editor_df[["직원명"] + [c for c in editor_df.columns if c != "직원명"]]
     zone_columns = [c for c in to_df.columns if c != to_df.columns[0]]
     zone_choices = set(zone_columns)
     zone_choices.update(str(val).strip() for val in display_df.values.flatten() if str(val).strip())
@@ -405,19 +406,17 @@ if 'result_df' in st.session_state:
             if col != "직원명"
             else st.column_config.TextColumn(label="직원명", disabled=True)
         )
-        for col in display_df_with_name.columns
+        for col in editor_df.columns
     }
-    edited_df = st.data_editor(display_df_with_name, use_container_width=True, height=450, column_config=column_settings)
-    csv_bytes = display_df_with_name.to_csv(index=True).encode('utf-8')
+    edited_editor_df = st.data_editor(editor_df, use_container_width=True, height=450, column_config=column_settings)
+    edited_df = edited_editor_df.copy()
+    edited_df["직원명"] = edited_df["직원명"].astype(str).str.strip()
+    edited_df = edited_df.set_index("직원명")
+    edited_df.index.name = "직원명"
+    edited_df = edited_df.reindex(columns=display_df.columns)
+    csv_bytes = edited_df.to_csv(index=True).encode('utf-8')
     file_name = f"rotation_{selected_store}_{selected_day_type}_{date.today():%Y%m%d}"
-    with BytesIO() as buf:
-        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            display_df_with_name.to_excel(writer, index=True, sheet_name="rotation")
-        buf.seek(0)
-        excel_bytes = buf.getvalue()
 
-    st.write("---")
-    st.markdown("### 📸 모바일 공유용 현황판")
     def get_staff_color(name):
         s_info = next((s for s in final_staff_configs if s['display_name'] == name), None)
         if not s_info:
@@ -441,6 +440,54 @@ if 'result_df' in st.session_state:
             return "#dbeafe"
         return ""
 
+    def excel_color(hex_color):
+        return hex_color.replace("#", "").upper()
+
+    def style_rotation_worksheet(ws, df):
+        thin_side = Side(style="thin", color="DDDDDD")
+        header_fill = PatternFill(fill_type="solid", fgColor=excel_color("#f8f9fa"))
+        meal_fill = PatternFill(fill_type="solid", fgColor=excel_color("#fff5ba"))
+        center_alignment = Alignment(horizontal="center", vertical="center")
+
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = Font(bold=True)
+            cell.alignment = center_alignment
+            cell.border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+
+        for row_idx, staff in enumerate(df.index, start=2):
+            name_cell = ws.cell(row=row_idx, column=1)
+            name_cell.font = Font(bold=True, color=excel_color(get_staff_color(staff)))
+            name_cell.alignment = center_alignment
+            name_cell.border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+
+            for col_idx, value in enumerate(df.loc[staff], start=2):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                cell.alignment = center_alignment
+                cell.border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+
+                if str(value) == "식사":
+                    cell.fill = meal_fill
+                    continue
+
+                zone_color = get_zone_background(value)
+                if zone_color:
+                    cell.fill = PatternFill(fill_type="solid", fgColor=excel_color(zone_color))
+
+        ws.freeze_panes = "B2"
+        ws.column_dimensions["A"].width = 18
+
+        for col_idx in range(2, len(df.columns) + 2):
+            column_letter = ws.cell(row=1, column=col_idx).column_letter
+            ws.column_dimensions[column_letter].width = 12
+
+    with BytesIO() as buf:
+        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            edited_df.to_excel(writer, index=True, sheet_name="rotation")
+            style_rotation_worksheet(writer.book["rotation"], edited_df)
+        buf.seek(0)
+        excel_bytes = buf.getvalue()
+
     def build_table(df):
         table_html = "<table style='width:100%; border-collapse: collapse; text-align: center; border: 1px solid #ddd;'>"
         table_html += "<tr style='background-color: #f8f9fa;'><th style='border: 1px solid #ddd; padding: 10px;'>직원</th>"
@@ -450,7 +497,7 @@ if 'result_df' in st.session_state:
         for staff, row in df.iterrows():
             color = get_staff_color(staff)
             table_html += f"<tr><td style='border: 1px solid #ddd; padding: 8px; font-weight: bold; color: {color};'>{staff}</td>"
-            for col, val in row.items():
+            for _, val in row.items():
                 bg = ""
                 if str(val) == "식사":
                     bg = "background-color: #fff5ba;"
@@ -458,8 +505,7 @@ if 'result_df' in st.session_state:
                     zone_color = get_zone_background(val)
                     if zone_color:
                         bg = f"background-color: {zone_color};"
-                extra_style = f" color: {color};" if col == "직원명" else ""
-                table_html += f"<td style='border: 1px solid #ddd; padding: 8px; {bg}{extra_style}'>{val}</td>"
+                table_html += f"<td style='border: 1px solid #ddd; padding: 8px; {bg}'>{val}</td>"
             table_html += "</tr>"
         table_html += "</table>"
         return table_html
