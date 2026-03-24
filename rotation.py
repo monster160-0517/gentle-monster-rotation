@@ -5,6 +5,7 @@ import random
 import re
 import json
 from datetime import date
+from html import escape
 from io import BytesIO
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
@@ -139,6 +140,15 @@ def get_zone_priority(zone_name):
         return 2
     return 1
 
+def normalize_schedule_value(value):
+    text = str(value)
+    if text.strip() == "":
+        return ""
+    return text
+
+def is_enabled_flag(value):
+    return any(x in str(value).lower() for x in ['o', 'y', '1', 'v', '예'])
+
 def pick_best_staff(zone_name, pool, previous_assignments):
     if not pool:
         return None
@@ -186,7 +196,8 @@ def get_initial_staff(data):
                 "meal1": get_clean_time(row.get('점심', '')),
                 "meal2": get_clean_time(row.get('저녁', '')),
                 "meal_p": get_clean_time(row.get('식사시간', '')),
-                "can_counter": any(x in str(row.get('카운터여부', 'X')).lower() for x in ['o', 'y', '1', 'v', '예'])
+                "can_counter": is_enabled_flag(row.get('카운터여부', 'X')),
+                "can_support": is_enabled_flag(row.get('지원여부', 'X')),
             })
     return res
 
@@ -277,6 +288,7 @@ config_signature = json.dumps(
                 "out": s.get("out"),
                 "meals": s.get("meals", []),
                 "can_counter": s.get("can_counter", False),
+                "can_support": s.get("can_support", False),
             }
             for s in final_staff_configs
         ],
@@ -349,6 +361,7 @@ def run_rotation():
                     eligible = [
                         n for n in pool
                         if not (is_counter_zone(z) and not staff_lookup[n]["can_counter"])
+                        and not (is_support_zone(z) and not staff_lookup[n]["can_support"])
                     ]
                     zone_floor = get_floor_bucket(z)
                     floor_filtered = [n for n in eligible if can_assign_same_floor(n, zone_floor)]
@@ -367,7 +380,10 @@ def run_rotation():
                     pool.remove(chosen)
                     update_floor_state(chosen, z)
 
-            for n in list(pool): # 층별 균등 지원 배정
+            support_pool = [n for n in pool if staff_lookup[n]["can_support"]]
+            unsupported_pool = [n for n in pool if not staff_lookup[n]["can_support"]]
+
+            for n in support_pool: # 층별 균등 지원 배정
                 current_assignments = [
                     val for val in schedule_df.loc[slot].tolist()
                     if str(val).strip() not in ["-", "", " ", "식사"]
@@ -381,8 +397,13 @@ def run_rotation():
 
                 schedule_df.at[slot, n] = support_zone
                 previous_assignments[n] = support_zone
-                pool.remove(n)
                 update_floor_state(n, support_zone)
+
+            for n in unsupported_pool:
+                schedule_df.at[slot, n] = "-"
+                previous_assignments[n] = None
+                floor_state[n]["floor"] = None
+                floor_state[n]["count"] = 0
     return schedule_df
 
 if st.sidebar.button("🚀 로테이션 자동 생성", use_container_width=True):
@@ -391,7 +412,8 @@ if st.sidebar.button("🚀 로테이션 자동 생성", use_container_width=True
 # --- 화면 출력 ---
 if 'result_df' in st.session_state:
     res = st.session_state.result_df
-    display_df = res.transpose()
+    st.write(f"### 📅 [{selected_store} / {selected_day_type}] 로테이션")
+    display_df = res.transpose().applymap(normalize_schedule_value)
     display_df.index.name = "직원명"
     editor_df = display_df.reset_index()
     editor_df = editor_df[["직원명"] + [c for c in editor_df.columns if c != "직원명"]]
@@ -408,12 +430,21 @@ if 'result_df' in st.session_state:
         )
         for col in editor_df.columns
     }
-    edited_editor_df = st.data_editor(editor_df, use_container_width=True, height=450, column_config=column_settings)
+    edited_editor_df = st.data_editor(
+        editor_df,
+        use_container_width=True,
+        height=450,
+        column_config=column_settings,
+        hide_index=True,
+        num_rows="fixed",
+        key="rotation_editor",
+    )
     edited_df = edited_editor_df.copy()
     edited_df["직원명"] = edited_df["직원명"].astype(str).str.strip()
     edited_df = edited_df.set_index("직원명")
     edited_df.index.name = "직원명"
     edited_df = edited_df.reindex(columns=display_df.columns)
+    edited_df = edited_df.applymap(normalize_schedule_value)
     csv_bytes = edited_df.to_csv(index=True).encode('utf-8')
     file_name = f"rotation_{selected_store}_{selected_day_type}_{date.today():%Y%m%d}"
 
@@ -489,42 +520,51 @@ if 'result_df' in st.session_state:
         excel_bytes = buf.getvalue()
 
     def build_table(df):
-        table_html = "<table style='width:100%; border-collapse: collapse; text-align: center; border: 1px solid #ddd;'>"
-        table_html += "<tr style='background-color: #f8f9fa;'><th style='border: 1px solid #ddd; padding: 10px;'>직원</th>"
+        table_html = "<div class='table-scroll'><table class='rotation-table'>"
+        table_html += "<thead><tr><th>직원</th>"
         for time in df.columns:
-            table_html += f"<th style='border: 1px solid #ddd; padding: 10px; font-weight: bold;'>{time}</th>"
-        table_html += "</tr>"
+            table_html += f"<th>{escape(str(time))}</th>"
+        table_html += "</tr></thead><tbody>"
         for staff, row in df.iterrows():
             color = get_staff_color(staff)
-            table_html += f"<tr><td style='border: 1px solid #ddd; padding: 8px; font-weight: bold; color: {color};'>{staff}</td>"
+            table_html += f"<tr><td class='staff-name' style='color: {color};'>{escape(str(staff))}</td>"
             for _, val in row.items():
+                text = normalize_schedule_value(val)
                 bg = ""
-                if str(val) == "식사":
+                if text == "식사":
                     bg = "background-color: #fff5ba;"
                 else:
-                    zone_color = get_zone_background(val)
+                    zone_color = get_zone_background(text)
                     if zone_color:
                         bg = f"background-color: {zone_color};"
-                table_html += f"<td style='border: 1px solid #ddd; padding: 8px; {bg}'>{val}</td>"
+                table_html += f"<td style='{bg}'>{escape(text)}</td>"
             table_html += "</tr>"
-        table_html += "</table>"
+        table_html += "</tbody></table></div>"
         return table_html
 
+    table_styles = (
+        "<style>"
+        ".table-scroll{overflow:auto;background:#fff;border:1px solid #ddd;border-radius:12px;}"
+        ".rotation-table{width:max-content;min-width:100%;border-collapse:collapse;font-size:0.95rem;}"
+        ".rotation-table th,.rotation-table td{border:1px solid #ddd;padding:8px;text-align:center;vertical-align:middle;white-space:nowrap;}"
+        ".rotation-table thead th{position:sticky;top:0;background:#f8f9fa;z-index:3;}"
+        ".rotation-table .staff-name{position:sticky;left:0;background:#fff;font-weight:700;z-index:2;}"
+        ".rotation-table thead th:first-child{left:0;z-index:4;}"
+        "</style>"
+    )
     table_html = build_table(edited_df)
     page_html = "<!doctype html><html lang='ko'><head><meta charset='utf-8'/><title>모바일 공유 현황판</title>"
     page_html += (
         "<style>"
-        "html,body{height:100%;margin:0;padding:0;background:#fff;font-family:'Pretendard','Noto Sans KR',sans-serif;}"
-        ".page-wrap{display:flex;flex-direction:column;height:100%;padding:16px;box-sizing:border-box;}"
-        "h1{margin:0 0 12px;font-size:1.4rem;}"
-        ".table-container{flex:1;overflow:hidden;border:1px solid #ddd;border-radius:12px;}"
-        "table{width:100%;height:100%;border-collapse:collapse;font-size:0.95rem;}"
-        "th,td{border:1px solid #ddd;padding:6px;text-align:center;vertical-align:middle;}"
+        "html,body{height:100%;margin:0;padding:0;background:#f8fafc;font-family:'Pretendard','Noto Sans KR',sans-serif;}"
+        ".page-wrap{display:flex;flex-direction:column;height:100%;padding:16px;box-sizing:border-box;gap:12px;}"
+        "h1{margin:0;font-size:1.4rem;}"
         "</style>"
+        f"{table_styles}"
     )
-    page_html += "</head><body><div class='page-wrap'><h1>모바일 공유 현황판</h1><div class='table-container'>"
+    page_html += "</head><body><div class='page-wrap'><h1>모바일 공유 현황판</h1>"
     page_html += table_html
-    page_html += "</div></div></body></html>"
+    page_html += "</div></body></html>"
 
     widget_html = f"""
     <div style='margin-bottom:8px;'>
@@ -541,6 +581,7 @@ if 'result_df' in st.session_state:
     }}
     </script>
     """
+    st.markdown(table_styles, unsafe_allow_html=True)
     st.markdown(table_html, unsafe_allow_html=True)
     st.write("---")
     st.markdown("### 📸 모바일 공유용 현황판")
