@@ -18,7 +18,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("GENTLE MONSTER 플로어 스케쥴")
+st.title("GENTLE MONSTER 로테이션 시스템 v71.4")
 
 # 🔗 매장 및 시트 설정
 STORES = {
@@ -408,14 +408,14 @@ def run_rotation():
                 floor_state[n]["count"] = 0
     return schedule_df
 
-if st.sidebar.button("🚀 로테이션 자동 생성", use_container_width=True):
+if st.sidebar.button("🚀 로테이션 자동 생성", width="stretch"):
     st.session_state.result_df = run_rotation()
 
 # --- 화면 출력 ---
 if 'result_df' in st.session_state:
     res = st.session_state.result_df
     st.write(f"### 📅 [{selected_store} / {selected_day_type}] 로테이션")
-    display_df = res.transpose().applymap(normalize_schedule_value)
+    display_df = res.transpose().map(normalize_schedule_value)
     display_df.index.name = "직원명"
     editor_df = display_df.reset_index()
     editor_df = editor_df[["직원명"] + [c for c in editor_df.columns if c != "직원명"]]
@@ -434,7 +434,7 @@ if 'result_df' in st.session_state:
     }
     edited_editor_df = st.data_editor(
         editor_df,
-        use_container_width=True,
+        width="stretch",
         height=450,
         column_config=column_settings,
         hide_index=True,
@@ -446,7 +446,7 @@ if 'result_df' in st.session_state:
     edited_df = edited_df.set_index("직원명")
     edited_df.index.name = "직원명"
     edited_df = edited_df.reindex(columns=display_df.columns)
-    edited_df = edited_df.applymap(normalize_schedule_value)
+    edited_df = edited_df.map(normalize_schedule_value)
     csv_bytes = edited_df.to_csv(index=True).encode('utf-8')
     file_name = f"rotation_{selected_store}_{selected_day_type}_{date.today():%Y%m%d}"
 
