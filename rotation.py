@@ -318,6 +318,8 @@ def run_rotation():
     staff_lookup = {s['display_name']: s for s in final_staff_configs}
     previous_assignments = {n: None for n in working_names}
     floor_state = {n: {"floor": None, "count": 0} for n in working_names}
+    floor_1f_total = {n: 0 for n in working_names}  # 1층 총 배정 횟수
+    MAX_1F = 3
 
     def update_floor_state(name, zone):
         floor = get_floor_bucket(zone)
@@ -326,6 +328,8 @@ def run_rotation():
             state["floor"] = None
             state["count"] = 0
             return
+        if floor == "1f":
+            floor_1f_total[name] += 1
         if state["floor"] == floor:
             state["count"] += 1
         else:
@@ -365,10 +369,12 @@ def run_rotation():
                 mi = int(raw.split('-')[0]) if '-' in raw else int(float(raw or 0))
                 assigned = 0
                 while assigned < mi:
+                    zone_is_1f = get_floor_bucket(z) == "1f"
                     eligible = [
                         n for n in pool
                         if not (is_counter_zone(z) and not staff_lookup[n]["can_counter"])
                         and not (is_flexible_zone(z) and not staff_lookup[n]["can_flexible"])
+                        and not (zone_is_1f and floor_1f_total[n] >= MAX_1F)
                     ]
                     zone_floor = get_floor_bucket(z)
                     floor_filtered = [n for n in eligible if can_assign_same_floor(n, zone_floor)]
@@ -406,12 +412,20 @@ def run_rotation():
                 f1_cnt = sum(1 for val in current_assignments if get_zone_category(val) == "1f")
                 f2_cnt = sum(1 for val in current_assignments if get_zone_category(val) == "2f")
 
-                if flex_1f and flex_2f:
+                can_1f = flex_1f and floor_1f_total[n] < MAX_1F
+                if can_1f and flex_2f:
                     flexible_zone = flex_1f if f1_cnt <= f2_cnt else flex_2f
                     if previous_assignments.get(n) == flexible_zone:
                         flexible_zone = flex_2f if flexible_zone == flex_1f else flex_1f
+                    # 1층 선택됐는데 한도 초과면 2층으로
+                    if flexible_zone == flex_1f and floor_1f_total[n] >= MAX_1F:
+                        flexible_zone = flex_2f
+                elif flex_2f:
+                    flexible_zone = flex_2f
+                elif can_1f:
+                    flexible_zone = flex_1f
                 else:
-                    flexible_zone = flex_2f or flex_1f
+                    flexible_zone = flex_2f  # 한도 초과 시 2층으로 강제
 
                 schedule_df.at[slot, n] = flexible_zone
                 previous_assignments[n] = flexible_zone
