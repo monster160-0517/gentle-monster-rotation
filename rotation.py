@@ -310,6 +310,11 @@ def run_rotation():
     schedule_df = pd.DataFrame(index=all_time_slots, columns=working_names).fillna("-")
     all_zones = [c for c in to_df.columns if c != to_df.columns[0]]
 
+    # TO 시트에 실제 존재하는 유동 구역만 사용
+    flex_zones_in_to = [z for z in all_zones if is_flexible_zone(z)]
+    flex_1f = next((z for z in flex_zones_in_to if "1" in z), None)
+    flex_2f = next((z for z in flex_zones_in_to if "2" in z), None)
+
     staff_lookup = {s['display_name']: s for s in final_staff_configs}
     previous_assignments = {n: None for n in working_names}
     floor_state = {n: {"floor": None, "count": 0} for n in working_names}
@@ -385,17 +390,28 @@ def run_rotation():
             flexible_pool = [n for n in pool if staff_lookup[n]["can_flexible"]]
             inflexible_pool = [n for n in pool if not staff_lookup[n]["can_flexible"]]
 
-            for n in flexible_pool: # 층별 균등 유동 배정
+            for n in flexible_pool: # TO 시트에 있는 유동 구역만 사용
+                if not flex_1f and not flex_2f:
+                    # 유동 구역 자체가 없으면 미배정
+                    schedule_df.at[slot, n] = "-"
+                    previous_assignments[n] = None
+                    floor_state[n]["floor"] = None
+                    floor_state[n]["count"] = 0
+                    continue
+
                 current_assignments = [
                     val for val in schedule_df.loc[slot].tolist()
                     if str(val).strip() not in ["-", "", " ", "식사"]
                 ]
                 f1_cnt = sum(1 for val in current_assignments if get_zone_category(val) == "1f")
                 f2_cnt = sum(1 for val in current_assignments if get_zone_category(val) == "2f")
-                flexible_zone = "1층 유동" if f1_cnt <= f2_cnt else "2층 유동"
 
-                if previous_assignments.get(n) == flexible_zone:
-                    flexible_zone = "2층 유동" if flexible_zone == "1층 유동" else "1층 유동"
+                if flex_1f and flex_2f:
+                    flexible_zone = flex_1f if f1_cnt <= f2_cnt else flex_2f
+                    if previous_assignments.get(n) == flexible_zone:
+                        flexible_zone = flex_2f if flexible_zone == flex_1f else flex_1f
+                else:
+                    flexible_zone = flex_2f or flex_1f
 
                 schedule_df.at[slot, n] = flexible_zone
                 previous_assignments[n] = flexible_zone
