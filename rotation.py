@@ -142,6 +142,25 @@ def get_zone_priority(zone_name):
         return 2
     return 1
 
+def is_w_zone(zone_name):
+    zone = str(zone_name).upper()
+    return bool(re.search(r'(^|[^A-Z])W($|[^A-Z])', zone))
+
+def is_photo_zone(zone_name):
+    zone = str(zone_name).upper()
+    return "PHOTO" in zone
+
+def is_b1_zone(zone_name):
+    zone = str(zone_name).upper()
+    return "B1" in zone
+
+def get_special_zone_group(zone_name):
+    if is_counter_zone(zone_name):
+        return "counter"
+    if is_w_zone(zone_name):
+        return "w"
+    return None
+
 def normalize_schedule_value(value):
     text = str(value)
     if text.strip() == "":
@@ -319,7 +338,38 @@ def run_rotation():
     previous_assignments = {n: None for n in working_names}
     floor_state = {n: {"floor": None, "count": 0} for n in working_names}
     floor_1f_total = {n: 0 for n in working_names}  # 1층 총 배정 횟수
+    special_zone_history = {n: {} for n in working_names}
+    w_zone_hours = {n: 0 for n in working_names}
     MAX_1F = 3
+    MAX_W_HOURS = 2
+
+    def get_zone_identity(zone_name):
+        return str(zone_name).strip().upper()
+
+    def is_part_timer(name):
+        staff = staff_lookup.get(name, {})
+        return staff.get("type") == "파트"
+
+    def can_assign_zone(name, zone_name):
+        special_group = get_special_zone_group(zone_name)
+        zone_identity = get_zone_identity(zone_name)
+
+        if special_group:
+            previous_zone = special_zone_history[name].get(special_group)
+            if previous_zone and previous_zone != zone_identity:
+                return False
+
+        if is_w_zone(zone_name) and w_zone_hours[name] >= MAX_W_HOURS:
+            return False
+
+        return True
+
+    def record_zone_assignment(name, zone_name):
+        special_group = get_special_zone_group(zone_name)
+        if special_group:
+            special_zone_history[name][special_group] = get_zone_identity(zone_name)
+        if is_w_zone(zone_name):
+            w_zone_hours[name] += 1
 
     def update_floor_state(name, zone):
         floor = get_floor_bucket(zone)
@@ -364,6 +414,10 @@ def run_rotation():
             active_zones = [z for z in all_zones if str(to_row[z].iloc[0]).strip() != "0"]
             sorted_active_zones = sorted(active_zones, key=lambda z: (get_zone_priority(z), all_zones.index(z)))
 
+            photo_zones = [z for z in sorted_active_zones if is_photo_zone(z)]
+            prioritized_zones = [z for z in sorted_active_zones if z not in photo_zones]
+            sorted_active_zones = photo_zones + prioritized_zones
+
             for z in sorted_active_zones:
                 raw = str(to_row[z].iloc[0]).strip()
                 mi = int(raw.split('-')[0]) if '-' in raw else int(float(raw or 0))
@@ -375,7 +429,12 @@ def run_rotation():
                         if not (is_counter_zone(z) and not staff_lookup[n]["can_counter"])
                         and not (is_flexible_zone(z) and not staff_lookup[n]["can_flexible"])
                         and not (zone_is_1f and floor_1f_total[n] >= MAX_1F)
+                        and can_assign_zone(n, z)
                     ]
+                    if is_b1_zone(z):
+                        part_timer_eligible = [n for n in eligible if is_part_timer(n)]
+                        if part_timer_eligible:
+                            eligible = part_timer_eligible
                     zone_floor = get_floor_bucket(z)
                     floor_filtered = [n for n in eligible if can_assign_same_floor(n, zone_floor)]
                     working_candidates = floor_filtered or eligible
@@ -384,11 +443,22 @@ def run_rotation():
                         working_candidates,
                         previous_assignments,
                     )
+                    if not chosen and is_photo_zone(z) and assigned == 0:
+                        photo_fallback = [
+                            n for n in pool
+                            if can_assign_zone(n, z)
+                        ]
+                        chosen = pick_best_staff(
+                            z,
+                            photo_fallback,
+                            previous_assignments,
+                        )
                     if not chosen:
                         break
 
                     schedule_df.at[slot, chosen] = z
                     previous_assignments[chosen] = z
+                    record_zone_assignment(chosen, z)
                     assigned += 1
                     pool.remove(chosen)
                     update_floor_state(chosen, z)
