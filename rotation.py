@@ -422,7 +422,7 @@ def run_rotation():
     counter_consecutive_hours = {n: 0 for n in working_names}
     MAX_1F = 3
     MAX_W_HOURS = 2
-    MAX_CONSECUTIVE_COUNTER_HOURS = 2
+    MAX_CONSECUTIVE_COUNTER_HOURS = 1
 
     def get_zone_identity(zone_name):
         return str(zone_name).strip().upper()
