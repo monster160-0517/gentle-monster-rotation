@@ -531,6 +531,51 @@ def run_rotation():
 
         return counter_pass + other_first_pass + other_extra_pass
 
+    def choose_staff_for_zone(zone_name, pool_names, current_zone_count, ignore_1f_limit=False):
+        is_first_coverage_assignment = current_zone_count == 0
+        zone_is_1f = get_floor_bucket(zone_name) == "1f"
+        eligible = [
+            n for n in pool_names
+            if not (is_counter_zone(zone_name) and not staff_lookup[n]["can_counter"])
+            and not (is_flexible_zone(zone_name) and not staff_lookup[n]["can_flexible"])
+            and not (zone_is_1f and floor_1f_total[n] >= MAX_1F and not ignore_1f_limit)
+            and can_assign_zone(n, zone_name)
+        ]
+        if is_b1_zone(zone_name):
+            part_timer_eligible = [n for n in eligible if is_part_timer(n)]
+            if part_timer_eligible:
+                eligible = part_timer_eligible
+        zone_floor = get_floor_bucket(zone_name)
+        floor_filtered = [n for n in eligible if can_assign_same_floor(n, zone_floor)]
+        working_candidates = floor_filtered or eligible
+        if is_counter_zone(zone_name):
+            chosen = pick_counter_staff(zone_name, working_candidates)
+        else:
+            chosen = pick_best_staff(
+                zone_name,
+                working_candidates,
+                previous_assignments,
+            )
+        if not chosen and is_photo_zone(zone_name) and is_first_coverage_assignment:
+            photo_fallback = [
+                n for n in pool_names
+                if can_assign_zone(n, zone_name)
+            ]
+            chosen = pick_best_staff(
+                zone_name,
+                photo_fallback,
+                previous_assignments,
+            )
+        return chosen
+
+    def assign_staff_to_zone(slot, zone_name, chosen_name, zone_assigned_count):
+        schedule_df.at[slot, chosen_name] = zone_name
+        previous_assignments[chosen_name] = zone_name
+        record_zone_assignment(chosen_name, zone_name)
+        zone_assigned_count[zone_name] = zone_assigned_count.get(zone_name, 0) + 1
+        pool.remove(chosen_name)
+        update_floor_state(chosen_name, zone_name)
+
     for slot in all_time_slots:
         hr = int(slot.split(":")[0])
         pool = []
@@ -559,52 +604,41 @@ def run_rotation():
         if not to_row.empty:
             zone_assignment_plan = build_zone_assignment_plan(to_row)
             zone_assigned_count = {}
+            zone_required_capacity = {
+                z: parse_zone_capacity(to_row[z].iloc[0])
+                for z in all_zones
+                if parse_zone_capacity(to_row[z].iloc[0]) > 0 and not is_docent_zone(z)
+            }
 
             for z in zone_assignment_plan:
                 current_count = zone_assigned_count.get(z, 0)
-                is_first_coverage_assignment = current_count == 0
-                zone_is_1f = get_floor_bucket(z) == "1f"
-                eligible = [
-                    n for n in pool
-                    if not (is_counter_zone(z) and not staff_lookup[n]["can_counter"])
-                    and not (is_flexible_zone(z) and not staff_lookup[n]["can_flexible"])
-                    and not (zone_is_1f and floor_1f_total[n] >= MAX_1F)
-                    and can_assign_zone(n, z)
-                ]
-                if is_b1_zone(z):
-                    part_timer_eligible = [n for n in eligible if is_part_timer(n)]
-                    if part_timer_eligible:
-                        eligible = part_timer_eligible
-                zone_floor = get_floor_bucket(z)
-                floor_filtered = [n for n in eligible if can_assign_same_floor(n, zone_floor)]
-                working_candidates = floor_filtered or eligible
-                if is_counter_zone(z):
-                    chosen = pick_counter_staff(z, working_candidates)
-                else:
-                    chosen = pick_best_staff(
-                        z,
-                        working_candidates,
-                        previous_assignments,
-                    )
-                if not chosen and is_photo_zone(z) and is_first_coverage_assignment:
-                    photo_fallback = [
-                        n for n in pool
-                        if can_assign_zone(n, z)
-                    ]
-                    chosen = pick_best_staff(
-                        z,
-                        photo_fallback,
-                        previous_assignments,
-                    )
+                chosen = choose_staff_for_zone(z, pool, current_count)
                 if not chosen:
                     continue
+                assign_staff_to_zone(slot, z, chosen, zone_assigned_count)
 
-                schedule_df.at[slot, chosen] = z
-                previous_assignments[chosen] = z
-                record_zone_assignment(chosen, z)
-                zone_assigned_count[z] = current_count + 1
-                pool.remove(chosen)
-                update_floor_state(chosen, z)
+            # First pass can miss valid assignments because earlier choices tighten constraints.
+            # Try one more sweep with the remaining pool before sending people to flexible / "-".
+            if pool:
+                remaining_zones = []
+                for zone_name in all_zones:
+                    required = zone_required_capacity.get(zone_name, 0)
+                    assigned = zone_assigned_count.get(zone_name, 0)
+                    if required > assigned:
+                        remaining_zones.extend([zone_name] * (required - assigned))
+
+                for z in remaining_zones:
+                    chosen = choose_staff_for_zone(z, pool, zone_assigned_count.get(z, 0))
+                    if not chosen:
+                        chosen = choose_staff_for_zone(
+                            z,
+                            pool,
+                            zone_assigned_count.get(z, 0),
+                            ignore_1f_limit=True,
+                        )
+                    if not chosen:
+                        continue
+                    assign_staff_to_zone(slot, z, chosen, zone_assigned_count)
 
             flexible_pool = [n for n in pool if staff_lookup[n]["can_flexible"]]
             inflexible_pool = [n for n in pool if not staff_lookup[n]["can_flexible"]]
@@ -710,6 +744,8 @@ if 'result_df' in st.session_state:
 
         active_zones = []
         for zone in zone_columns:
+            if is_docent_zone(zone):
+                continue
             for slot in df.columns:
                 to_row = to_df[to_df[to_df.columns[0]].astype(str).str.contains(slot, na=False)]
                 if to_row.empty:
