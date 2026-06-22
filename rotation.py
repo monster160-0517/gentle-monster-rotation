@@ -604,6 +604,7 @@ if 'result_df' in st.session_state:
     def build_unassigned_zone_summary(df):
         summary_rows = []
         total_empty_zones = 0
+        total_shortfall = 0
         affected_times = 0
 
         for slot in df.columns:
@@ -624,26 +625,35 @@ if 'result_df' in st.session_state:
                     assigned_counts[zone_name] = assigned_counts.get(zone_name, 0) + 1
 
             empty_zones = []
+            shortage_zones = []
+            shortfall_count = 0
             for zone, required in required_counts.items():
                 assigned = assigned_counts.get(zone, 0)
                 if required > 0 and assigned == 0:
                     empty_zones.append(zone)
+                shortfall = max(required - assigned, 0)
+                if shortfall > 0:
+                    shortage_zones.append(f"{zone} ({shortfall})")
+                    shortfall_count += shortfall
 
             empty_count = len(empty_zones)
-            if empty_count > 0:
+            if empty_count > 0 or shortfall_count > 0:
                 affected_times += 1
-                total_empty_zones += empty_count
+            total_empty_zones += empty_count
+            total_shortfall += shortfall_count
 
             summary_rows.append(
                 {
                     "time": slot,
                     "empty_count": empty_count,
-                    "status": "주의" if empty_count > 0 else "정상",
+                    "shortfall_count": shortfall_count,
+                    "status": "주의" if empty_count > 0 or shortfall_count > 0 else "정상",
                     "empty_zones": empty_zones,
+                    "shortage_zones": shortage_zones,
                 }
             )
 
-        return summary_rows, total_empty_zones, affected_times
+        return summary_rows, total_empty_zones, total_shortfall, affected_times
 
     def get_staff_color(name):
         s_info = next((s for s in final_staff_configs if s['display_name'] == name), None)
@@ -742,14 +752,17 @@ if 'result_df' in st.session_state:
     def build_unassigned_zone_panel(summary_rows):
         panel_html = "<div class='gap-board'>"
         for row in summary_rows:
-            status_class = "alert" if row["empty_count"] > 0 else "ok"
-            missing_detail = ", ".join(row["empty_zones"]) if row["empty_zones"] else "모든 필수 구역 배정 완료"
+            status_class = "alert" if row["empty_count"] > 0 or row["shortfall_count"] > 0 else "ok"
+            empty_detail = ", ".join(row["empty_zones"]) if row["empty_zones"] else "없음"
+            shortage_detail = ", ".join(row["shortage_zones"]) if row["shortage_zones"] else "없음"
             panel_html += (
                 f"<div class='gap-card {status_class}'>"
                 f"<div class='gap-time'>{escape(row['time'])}</div>"
                 f"<div class='gap-status'>{escape(row['status'])}</div>"
                 f"<div class='gap-count'>빈 구역 {row['empty_count']}개</div>"
-                f"<div class='gap-detail'>{escape(missing_detail)}</div>"
+                f"<div class='gap-count'>부족 인원 {row['shortfall_count']}명</div>"
+                f"<div class='gap-detail'>빈 구역: {escape(empty_detail)}</div>"
+                f"<div class='gap-detail'>부족 현황: {escape(shortage_detail)}</div>"
                 "</div>"
             )
         panel_html += "</div>"
@@ -775,7 +788,7 @@ if 'result_df' in st.session_state:
         ".gap-detail{margin-top:8px;font-size:0.84rem;line-height:1.45;color:#4b5563;}"
         "</style>"
     )
-    gap_summary_rows, total_empty_zones, affected_times = build_unassigned_zone_summary(edited_df)
+    gap_summary_rows, total_empty_zones, total_shortfall, affected_times = build_unassigned_zone_summary(edited_df)
     table_html = build_table(edited_df)
     gap_panel_html = build_unassigned_zone_panel(gap_summary_rows)
     page_html = "<!doctype html><html lang='ko'><head><meta charset='utf-8'/><title>모바일 공유 현황판</title>"
@@ -810,9 +823,10 @@ if 'result_df' in st.session_state:
     """
     st.markdown(table_styles, unsafe_allow_html=True)
     st.markdown("### 🚨 미배정 구역 체크")
-    metric_col1, metric_col2 = st.columns(2)
+    metric_col1, metric_col2, metric_col3 = st.columns(3)
     metric_col1.metric("빈 구역 총수", total_empty_zones)
-    metric_col2.metric("영향 시간대", affected_times)
+    metric_col2.metric("부족 인원 총수", total_shortfall)
+    metric_col3.metric("영향 시간대", affected_times)
     st.markdown(gap_panel_html, unsafe_allow_html=True)
     st.write("---")
     st.markdown("### 📸 모바일 공유용 현황판")
