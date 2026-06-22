@@ -19,7 +19,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("GENTLE MONSTER 로테이션 시스템 v71.5")
+st.title("GENTLE MONSTER 로테이션 시스템 v71.6")
 
 # 🔗 매장 및 시트 설정
 STORES = {
@@ -483,6 +483,26 @@ def run_rotation():
         state = floor_state[name]
         return not (state["floor"] == floor and state["count"] >= 2)
 
+    def parse_zone_capacity(raw_value):
+        raw = str(raw_value).strip()
+        if raw in ["", "0", "-", "nan"]:
+            return 0
+        return int(raw.split('-')[0]) if '-' in raw else int(float(raw or 0))
+
+    def build_zone_assignment_plan(to_row):
+        first_pass = []
+        extra_pass = []
+
+        for zone_name in all_zones:
+            capacity = parse_zone_capacity(to_row[zone_name].iloc[0])
+            if capacity <= 0:
+                continue
+            first_pass.append(zone_name)
+            if capacity > 1:
+                extra_pass.extend([zone_name] * (capacity - 1))
+
+        return first_pass + extra_pass
+
     for slot in all_time_slots:
         hr = int(slot.split(":")[0])
         pool = []
@@ -509,60 +529,54 @@ def run_rotation():
         to_row = to_df[to_df[to_df.columns[0]].str.contains(slot, na=False)]
         
         if not to_row.empty:
-            active_zones = [z for z in all_zones if str(to_row[z].iloc[0]).strip() != "0"]
-            sorted_active_zones = sorted(active_zones, key=lambda z: (get_zone_priority(z), all_zones.index(z)))
+            zone_assignment_plan = build_zone_assignment_plan(to_row)
+            zone_assigned_count = {}
 
-            photo_zones = [z for z in sorted_active_zones if is_photo_zone(z)]
-            prioritized_zones = [z for z in sorted_active_zones if z not in photo_zones]
-            sorted_active_zones = photo_zones + prioritized_zones
-
-            for z in sorted_active_zones:
-                raw = str(to_row[z].iloc[0]).strip()
-                mi = int(raw.split('-')[0]) if '-' in raw else int(float(raw or 0))
-                assigned = 0
-                while assigned < mi:
-                    zone_is_1f = get_floor_bucket(z) == "1f"
-                    eligible = [
+            for z in zone_assignment_plan:
+                current_count = zone_assigned_count.get(z, 0)
+                is_first_coverage_assignment = current_count == 0
+                zone_is_1f = get_floor_bucket(z) == "1f"
+                eligible = [
+                    n for n in pool
+                    if not (is_counter_zone(z) and not staff_lookup[n]["can_counter"])
+                    and not (is_flexible_zone(z) and not staff_lookup[n]["can_flexible"])
+                    and not (zone_is_1f and floor_1f_total[n] >= MAX_1F)
+                    and can_assign_zone(n, z)
+                ]
+                if is_b1_zone(z):
+                    part_timer_eligible = [n for n in eligible if is_part_timer(n)]
+                    if part_timer_eligible:
+                        eligible = part_timer_eligible
+                zone_floor = get_floor_bucket(z)
+                floor_filtered = [n for n in eligible if can_assign_same_floor(n, zone_floor)]
+                working_candidates = floor_filtered or eligible
+                if is_counter_zone(z):
+                    chosen = pick_counter_staff(z, working_candidates)
+                else:
+                    chosen = pick_best_staff(
+                        z,
+                        working_candidates,
+                        previous_assignments,
+                    )
+                if not chosen and is_photo_zone(z) and is_first_coverage_assignment:
+                    photo_fallback = [
                         n for n in pool
-                        if not (is_counter_zone(z) and not staff_lookup[n]["can_counter"])
-                        and not (is_flexible_zone(z) and not staff_lookup[n]["can_flexible"])
-                        and not (zone_is_1f and floor_1f_total[n] >= MAX_1F)
-                        and can_assign_zone(n, z)
+                        if can_assign_zone(n, z)
                     ]
-                    if is_b1_zone(z):
-                        part_timer_eligible = [n for n in eligible if is_part_timer(n)]
-                        if part_timer_eligible:
-                            eligible = part_timer_eligible
-                    zone_floor = get_floor_bucket(z)
-                    floor_filtered = [n for n in eligible if can_assign_same_floor(n, zone_floor)]
-                    working_candidates = floor_filtered or eligible
-                    if is_counter_zone(z):
-                        chosen = pick_counter_staff(z, working_candidates)
-                    else:
-                        chosen = pick_best_staff(
-                            z,
-                            working_candidates,
-                            previous_assignments,
-                        )
-                    if not chosen and is_photo_zone(z) and assigned == 0:
-                        photo_fallback = [
-                            n for n in pool
-                            if can_assign_zone(n, z)
-                        ]
-                        chosen = pick_best_staff(
-                            z,
-                            photo_fallback,
-                            previous_assignments,
-                        )
-                    if not chosen:
-                        break
+                    chosen = pick_best_staff(
+                        z,
+                        photo_fallback,
+                        previous_assignments,
+                    )
+                if not chosen:
+                    continue
 
-                    schedule_df.at[slot, chosen] = z
-                    previous_assignments[chosen] = z
-                    record_zone_assignment(chosen, z)
-                    assigned += 1
-                    pool.remove(chosen)
-                    update_floor_state(chosen, z)
+                schedule_df.at[slot, chosen] = z
+                previous_assignments[chosen] = z
+                record_zone_assignment(chosen, z)
+                zone_assigned_count[z] = current_count + 1
+                pool.remove(chosen)
+                update_floor_state(chosen, z)
 
             flexible_pool = [n for n in pool if staff_lookup[n]["can_flexible"]]
             inflexible_pool = [n for n in pool if not staff_lookup[n]["can_flexible"]]
@@ -663,7 +677,7 @@ if 'result_df' in st.session_state:
     def build_zone_coverage_summary(df):
         coverage_rows = []
         total_empty_zones = 0
-        total_shortfall = 0
+        total_remaining_to = 0
         affected_times = set()
 
         active_zones = []
@@ -692,25 +706,26 @@ if 'result_df' in st.session_state:
                     continue
 
                 assigned = sum(1 for value in df[slot].tolist() if str(value).strip() == zone)
-                shortfall = max(required - assigned, 0)
+                remaining_to = max(required - assigned, 0)
 
                 if assigned == 0:
                     total_empty_zones += 1
                     affected_times.add(slot)
-                if shortfall > 0:
-                    total_shortfall += shortfall
+                if remaining_to > 0:
+                    total_remaining_to += remaining_to
+                if assigned == 0:
                     affected_times.add(slot)
 
                 row[slot] = {
                     "assigned": assigned,
-                    "required": required,
-                    "shortfall": shortfall,
+                    "to": required,
+                    "remaining_to": remaining_to,
                     "is_empty": assigned == 0,
                 }
 
             coverage_rows.append(row)
 
-        return coverage_rows, total_empty_zones, total_shortfall, len(affected_times)
+        return coverage_rows, total_empty_zones, total_remaining_to, len(affected_times)
 
     def get_staff_color(name):
         s_info = next((s for s in final_staff_configs if s['display_name'] == name), None)
@@ -829,15 +844,13 @@ if 'result_df' in st.session_state:
                 classes = ["coverage-cell"]
                 if cell["is_empty"]:
                     classes.append("empty")
-                elif cell["shortfall"] > 0:
-                    classes.append("short")
                 else:
                     classes.append("filled")
 
                 table_html += (
                     f"<td class='{' '.join(classes)}'>"
                     f"<div class='coverage-assigned'>{cell['assigned']}명</div>"
-                    f"<div class='coverage-required'>필요 {cell['required']}명</div>"
+                    f"<div class='coverage-required'>TO {cell['to']}명</div>"
                     "</td>"
                 )
             table_html += "</tr>"
@@ -858,13 +871,12 @@ if 'result_df' in st.session_state:
         ".coverage-cell{min-width:88px;background:#ffffff;}"
         ".coverage-cell.inactive{background:#f8fafc;color:#94a3b8;}"
         ".coverage-cell.filled{background:#f0fdf4;}"
-        ".coverage-cell.short{background:#fff7ed;}"
         ".coverage-cell.empty{border:2px solid #dc2626 !important;background:#fff1f2;}"
         ".coverage-assigned{font-size:0.95rem;font-weight:700;color:#111827;}"
         ".coverage-required{margin-top:4px;font-size:0.78rem;color:#64748b;}"
         "</style>"
     )
-    coverage_rows, total_empty_zones, total_shortfall, affected_times = build_zone_coverage_summary(edited_df)
+    coverage_rows, total_empty_zones, total_remaining_to, affected_times = build_zone_coverage_summary(edited_df)
     table_html = build_table(edited_df)
     coverage_table_html = build_zone_coverage_table(coverage_rows, edited_df.columns)
     page_html = "<!doctype html><html lang='ko'><head><meta charset='utf-8'/><title>모바일 공유 현황판</title>"
@@ -901,9 +913,9 @@ if 'result_df' in st.session_state:
     st.markdown("### 🚨 구역별 배치 인원 체크")
     metric_col1, metric_col2, metric_col3 = st.columns(3)
     metric_col1.metric("빈 구역 총수", total_empty_zones)
-    metric_col2.metric("부족 인원 총수", total_shortfall)
+    metric_col2.metric("남은 TO 총수", total_remaining_to)
     metric_col3.metric("영향 시간대", affected_times)
-    st.caption("각 칸은 배치 인원과 필요 인원입니다. `0명`인 칸만 빨간 테두리로 강조했습니다.")
+    st.caption("TO는 최대 배치 가능 인원입니다. `0명`인 칸만 빨간 테두리로 강조했고, 배정은 0명 방지 후 왼쪽 구역부터 채웁니다.")
     st.markdown(coverage_table_html, unsafe_allow_html=True)
     st.write("---")
     st.markdown("### 🎨 컬러 현황표")
