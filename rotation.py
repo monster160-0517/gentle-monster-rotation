@@ -559,6 +559,7 @@ if st.sidebar.button("🚀 로테이션 자동 생성", width="stretch"):
 if 'result_df' in st.session_state:
     res = st.session_state.result_df
     st.write(f"### 📅 [{selected_store} / {selected_day_type}] 로테이션")
+    st.caption("수정은 아래 표에서 하고, 변경 내용은 모바일 공유용 현황판에 바로 반영됩니다.")
     display_df = res.transpose().map(normalize_schedule_value)
     display_df.index.name = "직원명"
     editor_df = display_df.reset_index()
@@ -813,7 +814,6 @@ if 'result_df' in st.session_state:
     metric_col1.metric("빈 구역 총수", total_empty_zones)
     metric_col2.metric("영향 시간대", affected_times)
     st.markdown(gap_panel_html, unsafe_allow_html=True)
-    st.markdown(table_html, unsafe_allow_html=True)
     st.write("---")
     st.markdown("### 📸 모바일 공유용 현황판")
     components.html(widget_html, height=110)
