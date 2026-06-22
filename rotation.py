@@ -177,8 +177,6 @@ def is_docent_zone(zone_name):
     return "도슨트" in zone or "DOCENT" in zone.upper()
 
 def get_special_zone_group(zone_name):
-    if is_counter_zone(zone_name):
-        return "counter"
     if is_w_zone(zone_name):
         return "w"
     return None
