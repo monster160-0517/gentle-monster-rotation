@@ -514,18 +514,22 @@ def run_rotation():
         return int(raw.split('-')[0]) if '-' in raw else int(float(raw or 0))
 
     def build_zone_assignment_plan(to_row):
-        first_pass = []
-        extra_pass = []
+        counter_pass = []
+        other_first_pass = []
+        other_extra_pass = []
 
         for zone_name in all_zones:
             capacity = parse_zone_capacity(to_row[zone_name].iloc[0])
             if capacity <= 0 or is_docent_zone(zone_name):
                 continue
-            first_pass.append(zone_name)
-            if capacity > 1:
-                extra_pass.extend([zone_name] * (capacity - 1))
+            if is_counter_zone(zone_name):
+                counter_pass.extend([zone_name] * capacity)
+            else:
+                other_first_pass.append(zone_name)
+                if capacity > 1:
+                    other_extra_pass.extend([zone_name] * (capacity - 1))
 
-        return first_pass + extra_pass
+        return counter_pass + other_first_pass + other_extra_pass
 
     for slot in all_time_slots:
         hr = int(slot.split(":")[0])
