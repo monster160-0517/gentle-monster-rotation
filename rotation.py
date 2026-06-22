@@ -7,6 +7,7 @@ import json
 from datetime import date
 from html import escape
 from io import BytesIO
+from urllib.parse import quote
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 # 1. 페이지 설정
@@ -55,8 +56,12 @@ DB_SHEET_GID = day_type_config["DB_GID"]
 TO_SHEET_GID = day_type_config["TO_GID"]
 
 @st.cache_data(ttl=1)
-def load_sheet_data(sheet_id, gid):
-    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+def load_sheet_data(sheet_id, gid=None, sheet_name=None):
+    if sheet_name:
+        encoded_sheet_name = quote(sheet_name)
+        url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={encoded_sheet_name}"
+    else:
+        url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
     try:
         df = pd.read_csv(url, skip_blank_lines=True, dtype=str)
         df.columns = [str(c).strip() for c in df.columns]
@@ -68,6 +73,7 @@ def load_sheet_data(sheet_id, gid):
 
 db_df = load_sheet_data(SHEET_ID, DB_SHEET_GID)
 to_df = load_sheet_data(SHEET_ID, TO_SHEET_GID)
+docent_df = load_sheet_data(SHEET_ID, sheet_name="도슨트")
 
 if db_df.empty: st.stop()
 
@@ -91,6 +97,18 @@ def build_work_range(in_val, out_val, default_in=11, default_out=21):
     if out_hr <= in_hr:
         return None, in_hr, out_hr
     return range(in_hr, out_hr), in_hr, out_hr
+
+def parse_time_list(value):
+    text = str(value).strip()
+    if not text:
+        return []
+    chunks = re.split(r'[,/\n;]+', text)
+    times = []
+    for chunk in chunks:
+        clean = get_clean_time(chunk)
+        if clean:
+            times.append(clean)
+    return sorted(set(times))
 
 def is_counter_zone(zone_name):
     zone = str(zone_name).upper()
@@ -161,6 +179,9 @@ def get_special_zone_group(zone_name):
         return "w"
     return None
 
+def is_docent_assignment(value):
+    return str(value).strip() == "도슨트"
+
 def normalize_schedule_value(value):
     text = str(value)
     if text.strip() == "":
@@ -222,10 +243,35 @@ def get_initial_staff(data):
             })
     return res
 
+def get_docent_schedule(data):
+    if data.empty:
+        return {}
+
+    name_col = next((c for c in data.columns if '이름' in c), '이름')
+    docent_col = next((c for c in data.columns if '도슨트' in c), '도슨트')
+    schedule = {}
+
+    for _, row in data.iterrows():
+        name = str(row.get(name_col, "")).strip()
+        docent_times = parse_time_list(row.get(docent_col, ""))
+        if name and docent_times:
+            schedule[name] = docent_times
+
+    return schedule
+
 raw_staff = get_initial_staff(db_df)
+docent_schedule = get_docent_schedule(docent_df)
 
 # --- 사이드바: 파트타이머 상세 조정 ---
 st.sidebar.header("🕹️ 인원 관리")
+use_docent_schedule = st.sidebar.checkbox("🎤 도슨트 일정 반영", value=True)
+with st.sidebar.expander("🎤 도슨트 탭", expanded=False):
+    if docent_schedule:
+        for docent_name, docent_times in sorted(docent_schedule.items()):
+            st.write(f"{docent_name}: {', '.join(docent_times)}")
+    else:
+        st.caption("도슨트 탭에 기록된 시간이 없습니다.")
+
 pt_list = [s for s in raw_staff if s['type'] == '파트']
 
 pt_input_defaults = {
@@ -265,6 +311,7 @@ for s in [x for x in raw_staff if x['type'] == '정직']:
     tag = "(A조)" if in_hr <= 10 else "(B조)"
     s['display_name'] = f"{s['original_name']}{tag}"
     s['meals'] = list(set([m for m in [s['meal1'], s['meal2']] if m]))
+    s['docent_times'] = docent_schedule.get(s['original_name'], []) if use_docent_schedule else []
     s['work_range'] = work_range
     s['in'] = f"{in_hr:02d}:00"
     s['out'] = f"{out_hr:02d}:00"
@@ -294,6 +341,7 @@ if selected_pt_names:
             pt_copy['out'] = f"{out_hr:02d}:00"
             pt_copy['meal_p'] = get_clean_time(new_meal)
             pt_copy['meals'] = [pt_copy['meal_p']] if pt_copy['meal_p'] else []
+            pt_copy['docent_times'] = docent_schedule.get(pt_copy['original_name'], []) if use_docent_schedule else []
             pt_copy['work_range'] = work_range
             final_staff_configs.append(pt_copy)
 
@@ -308,11 +356,14 @@ config_signature = json.dumps(
                 "in": s.get("in"),
                 "out": s.get("out"),
                 "meals": s.get("meals", []),
+                "docent_times": s.get("docent_times", []),
                 "can_counter": s.get("can_counter", False),
                 "can_flexible": s.get("can_flexible", False),
             }
             for s in final_staff_configs
         ],
+        "use_docent_schedule": use_docent_schedule,
+        "docent_schedule": docent_schedule,
     },
     ensure_ascii=False,
     sort_keys=True,
@@ -435,6 +486,11 @@ def run_rotation():
         for s in final_staff_configs:
             if slot in s["meals"]:
                 schedule_df.at[slot, s['display_name']] = "식사"
+                floor_state[s['display_name']]['floor'] = None
+                floor_state[s['display_name']]['count'] = 0
+                counter_consecutive_hours[s['display_name']] = 0
+            elif slot in s.get("docent_times", []):
+                schedule_df.at[slot, s['display_name']] = "도슨트"
                 floor_state[s['display_name']]['floor'] = None
                 floor_state[s['display_name']]['count'] = 0
                 counter_consecutive_hours[s['display_name']] = 0
@@ -567,7 +623,7 @@ if 'result_df' in st.session_state:
     zone_columns = [c for c in to_df.columns if c != to_df.columns[0]]
     zone_choices = set(zone_columns)
     zone_choices.update(str(val).strip() for val in display_df.values.flatten() if str(val).strip())
-    zone_choices.update(["식사", "1층 유동", "2층 유동", "-", ""])
+    zone_choices.update(["식사", "도슨트", "1층 유동", "2층 유동", "-", ""])
     zone_choices = sorted(zone_choices)
     column_settings = {
         col: (
@@ -707,6 +763,9 @@ if 'result_df' in st.session_state:
                 if str(value) == "식사":
                     cell.fill = meal_fill
                     continue
+                if str(value) == "도슨트":
+                    cell.fill = PatternFill(fill_type="solid", fgColor=excel_color("#fde68a"))
+                    continue
 
                 zone_color = get_zone_background(value)
                 if zone_color:
@@ -740,6 +799,8 @@ if 'result_df' in st.session_state:
                 bg = ""
                 if text == "식사":
                     bg = "background-color: #fff5ba;"
+                elif is_docent_assignment(text):
+                    bg = "background-color: #fde68a;"
                 else:
                     zone_color = get_zone_background(text)
                     if zone_color:
