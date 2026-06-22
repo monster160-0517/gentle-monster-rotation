@@ -172,6 +172,10 @@ def is_b1_zone(zone_name):
     zone = str(zone_name).upper()
     return "B1" in zone
 
+def is_docent_zone(zone_name):
+    zone = str(zone_name).strip()
+    return "도슨트" in zone or "DOCENT" in zone.upper()
+
 def get_special_zone_group(zone_name):
     if is_counter_zone(zone_name):
         return "counter"
@@ -225,11 +229,15 @@ def pick_best_staff(zone_name, pool, previous_assignments):
 def get_initial_staff(data):
     type_col = next((c for c in data.columns if '구분' in c), '구분')
     name_col = next((c for c in data.columns if '이름' in c), '이름')
+    docent_cols = [c for c in data.columns if '도슨트' in str(c)]
     res = []
     for _, row in data.iterrows():
         name = str(row.get(name_col, "")).strip()
         stype = str(row.get(type_col, "")).strip()
         if name and any(kw in stype for kw in ['정직', '파트']):
+            docent_times = []
+            for docent_col in docent_cols:
+                docent_times.extend(parse_time_list(row.get(docent_col, "")))
             res.append({
                 "original_name": name,
                 "type": '정직' if '정직' in stype else '파트',
@@ -240,27 +248,39 @@ def get_initial_staff(data):
                 "meal_p": get_clean_time(row.get('식사시간', '')),
                 "can_counter": is_enabled_flag(row.get('카운터여부', 'X')),
                 "can_flexible": is_enabled_flag(row.get('유동여부', 'X')),
+                "docent_times": sorted(set(docent_times)),
             })
     return res
 
-def get_docent_schedule(data):
-    if data.empty:
-        return {}
+def get_docent_schedule(staff_rows, extra_data):
+    schedule = {
+        staff["original_name"]: list(staff.get("docent_times", []))
+        for staff in staff_rows
+        if staff.get("docent_times")
+    }
 
-    name_col = next((c for c in data.columns if '이름' in c), '이름')
-    docent_col = next((c for c in data.columns if '도슨트' in c), '도슨트')
-    schedule = {}
+    if extra_data.empty:
+        return schedule
 
-    for _, row in data.iterrows():
+    name_col = next((c for c in extra_data.columns if '이름' in c), '이름')
+    docent_cols = [c for c in extra_data.columns if '도슨트' in str(c)]
+    if not docent_cols:
+        return schedule
+
+    for _, row in extra_data.iterrows():
         name = str(row.get(name_col, "")).strip()
-        docent_times = parse_time_list(row.get(docent_col, ""))
-        if name and docent_times:
-            schedule[name] = docent_times
+        docent_times = []
+        for docent_col in docent_cols:
+            docent_times.extend(parse_time_list(row.get(docent_col, "")))
+        if name:
+            merged = sorted(set(schedule.get(name, []) + docent_times))
+            if merged:
+                schedule[name] = merged
 
     return schedule
 
 raw_staff = get_initial_staff(db_df)
-docent_schedule = get_docent_schedule(docent_df)
+docent_schedule = get_docent_schedule(raw_staff, docent_df)
 
 # --- 사이드바: 파트타이머 상세 조정 ---
 st.sidebar.header("🕹️ 인원 관리")
@@ -270,7 +290,7 @@ with st.sidebar.expander("🎤 도슨트 탭", expanded=False):
         for docent_name, docent_times in sorted(docent_schedule.items()):
             st.write(f"{docent_name}: {', '.join(docent_times)}")
     else:
-        st.caption("도슨트 탭에 기록된 시간이 없습니다.")
+        st.caption("직원DB 또는 도슨트 탭에 기록된 시간이 없습니다.")
 
 pt_list = [s for s in raw_staff if s['type'] == '파트']
 
@@ -495,7 +515,7 @@ def run_rotation():
 
         for zone_name in all_zones:
             capacity = parse_zone_capacity(to_row[zone_name].iloc[0])
-            if capacity <= 0:
+            if capacity <= 0 or is_docent_zone(zone_name):
                 continue
             first_pass.append(zone_name)
             if capacity > 1:
