@@ -340,8 +340,11 @@ def run_rotation():
     floor_1f_total = {n: 0 for n in working_names}  # 1층 총 배정 횟수
     special_zone_history = {n: {} for n in working_names}
     w_zone_hours = {n: 0 for n in working_names}
+    counter_assignment_total = {n: 0 for n in working_names}
+    counter_consecutive_hours = {n: 0 for n in working_names}
     MAX_1F = 3
     MAX_W_HOURS = 2
+    MAX_CONSECUTIVE_COUNTER_HOURS = 2
 
     def get_zone_identity(zone_name):
         return str(zone_name).strip().upper()
@@ -349,6 +352,10 @@ def run_rotation():
     def is_part_timer(name):
         staff = staff_lookup.get(name, {})
         return staff.get("type") == "파트"
+
+    def is_full_time(name):
+        staff = staff_lookup.get(name, {})
+        return staff.get("type") == "정직"
 
     def can_assign_zone(name, zone_name):
         special_group = get_special_zone_group(zone_name)
@@ -362,6 +369,9 @@ def run_rotation():
         if is_w_zone(zone_name) and w_zone_hours[name] >= MAX_W_HOURS:
             return False
 
+        if is_counter_zone(zone_name) and counter_consecutive_hours[name] >= MAX_CONSECUTIVE_COUNTER_HOURS:
+            return False
+
         return True
 
     def record_zone_assignment(name, zone_name):
@@ -370,6 +380,33 @@ def run_rotation():
             special_zone_history[name][special_group] = get_zone_identity(zone_name)
         if is_w_zone(zone_name):
             w_zone_hours[name] += 1
+        if is_counter_zone(zone_name):
+            counter_assignment_total[name] += 1
+            counter_consecutive_hours[name] += 1
+        else:
+            counter_consecutive_hours[name] = 0
+
+    def pick_counter_staff(zone_name, candidates):
+        if not candidates:
+            return None
+
+        prioritized = [n for n in candidates if is_full_time(n)]
+        working_candidates = prioritized or candidates
+        min_counter_total = min(counter_assignment_total[n] for n in working_candidates)
+        least_used_candidates = [
+            n for n in working_candidates
+            if counter_assignment_total[n] == min_counter_total
+        ]
+        min_counter_streak = min(counter_consecutive_hours[n] for n in least_used_candidates)
+        streak_balanced_candidates = [
+            n for n in least_used_candidates
+            if counter_consecutive_hours[n] == min_counter_streak
+        ]
+        return pick_best_staff(
+            zone_name,
+            streak_balanced_candidates,
+            previous_assignments,
+        )
 
     def update_floor_state(name, zone):
         floor = get_floor_bucket(zone)
@@ -400,12 +437,14 @@ def run_rotation():
                 schedule_df.at[slot, s['display_name']] = "식사"
                 floor_state[s['display_name']]['floor'] = None
                 floor_state[s['display_name']]['count'] = 0
+                counter_consecutive_hours[s['display_name']] = 0
             elif hr in s["work_range"]:
                 pool.append(s['display_name'])
             else:
                 schedule_df.at[slot, s['display_name']] = " "
                 floor_state[s['display_name']]['floor'] = None
                 floor_state[s['display_name']]['count'] = 0
+                counter_consecutive_hours[s['display_name']] = 0
         
         random.shuffle(pool)
         to_row = to_df[to_df[to_df.columns[0]].str.contains(slot, na=False)]
@@ -438,11 +477,14 @@ def run_rotation():
                     zone_floor = get_floor_bucket(z)
                     floor_filtered = [n for n in eligible if can_assign_same_floor(n, zone_floor)]
                     working_candidates = floor_filtered or eligible
-                    chosen = pick_best_staff(
-                        z,
-                        working_candidates,
-                        previous_assignments,
-                    )
+                    if is_counter_zone(z):
+                        chosen = pick_counter_staff(z, working_candidates)
+                    else:
+                        chosen = pick_best_staff(
+                            z,
+                            working_candidates,
+                            previous_assignments,
+                        )
                     if not chosen and is_photo_zone(z) and assigned == 0:
                         photo_fallback = [
                             n for n in pool
@@ -499,6 +541,7 @@ def run_rotation():
 
                 schedule_df.at[slot, n] = flexible_zone
                 previous_assignments[n] = flexible_zone
+                record_zone_assignment(n, flexible_zone)
                 update_floor_state(n, flexible_zone)
 
             for n in inflexible_pool:
@@ -506,6 +549,7 @@ def run_rotation():
                 previous_assignments[n] = None
                 floor_state[n]["floor"] = None
                 floor_state[n]["count"] = 0
+                counter_consecutive_hours[n] = 0
     return schedule_df
 
 if st.sidebar.button("🚀 로테이션 자동 생성", width="stretch"):
