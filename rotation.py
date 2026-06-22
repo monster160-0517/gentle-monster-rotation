@@ -291,6 +291,7 @@ docent_schedule = get_docent_schedule(raw_staff, docent_df)
 st.sidebar.header("🕹️ 인원 관리")
 use_docent_schedule = st.sidebar.checkbox("🎤 도슨트 일정 반영", value=True)
 with st.sidebar.expander("🎤 도슨트 탭", expanded=False):
+    st.caption("`도슨트`, `도슨트1`, `도슨트2`, `도슨트3` 컬럼을 모두 자동 인식합니다.")
     if docent_schedule:
         for docent_name, docent_times in sorted(docent_schedule.items()):
             st.write(f"{docent_name}: {', '.join(docent_times)}")
