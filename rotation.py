@@ -870,6 +870,8 @@ if 'result_df' in st.session_state:
                 classes = ["coverage-cell"]
                 if cell["is_empty"]:
                     classes.append("empty")
+                elif cell["remaining_to"] > 0:
+                    classes.append("partial")
                 else:
                     classes.append("filled")
 
@@ -897,6 +899,7 @@ if 'result_df' in st.session_state:
         ".coverage-cell{min-width:88px;background:#ffffff;}"
         ".coverage-cell.inactive{background:#f8fafc;color:#94a3b8;}"
         ".coverage-cell.filled{background:#f0fdf4;}"
+        ".coverage-cell.partial{border:2px solid #eab308 !important;background:#fef9c3;}"
         ".coverage-cell.empty{border:2px solid #dc2626 !important;background:#fff1f2;}"
         ".coverage-assigned{font-size:0.95rem;font-weight:700;color:#111827;}"
         ".coverage-required{margin-top:4px;font-size:0.78rem;color:#64748b;}"
@@ -941,7 +944,7 @@ if 'result_df' in st.session_state:
     metric_col1.metric("빈 구역 총수", total_empty_zones)
     metric_col2.metric("남은 TO 총수", total_remaining_to)
     metric_col3.metric("영향 시간대", affected_times)
-    st.caption("TO는 최대 배치 가능 인원입니다. `0명`인 칸만 빨간 테두리로 강조했고, 배정은 0명 방지 후 왼쪽 구역부터 채웁니다.")
+    st.caption("TO는 최대 배치 가능 인원입니다. `0명`은 빨간색, TO가 다 차지 않은 칸은 노란색으로 강조합니다.")
     st.markdown(coverage_table_html, unsafe_allow_html=True)
     st.write("---")
     st.markdown("### 🎨 컬러 현황표")
