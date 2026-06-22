@@ -594,6 +594,58 @@ if 'result_df' in st.session_state:
     csv_bytes = edited_df.to_csv(index=True).encode('utf-8')
     file_name = f"rotation_{selected_store}_{selected_day_type}_{date.today():%Y%m%d}"
 
+    def parse_required_count(raw_value):
+        raw = str(raw_value).strip()
+        if raw in ["", "0", "-", "nan"]:
+            return 0
+        return int(raw.split('-')[0]) if '-' in raw else int(float(raw or 0))
+
+    def build_unassigned_zone_summary(df):
+        summary_rows = []
+        total_missing_slots = 0
+        affected_times = 0
+
+        for slot in df.columns:
+            to_row = to_df[to_df[to_df.columns[0]].astype(str).str.contains(slot, na=False)]
+            if to_row.empty:
+                continue
+
+            required_counts = {}
+            for zone in zone_columns:
+                required = parse_required_count(to_row[zone].iloc[0])
+                if required > 0:
+                    required_counts[zone] = required
+
+            assigned_counts = {}
+            for value in df[slot].tolist():
+                zone_name = str(value).strip()
+                if zone_name in required_counts:
+                    assigned_counts[zone_name] = assigned_counts.get(zone_name, 0) + 1
+
+            deficits = []
+            missing_count = 0
+            for zone, required in required_counts.items():
+                assigned = assigned_counts.get(zone, 0)
+                shortfall = max(required - assigned, 0)
+                if shortfall > 0:
+                    deficits.append(f"{zone} ({shortfall})")
+                    missing_count += shortfall
+
+            if missing_count > 0:
+                affected_times += 1
+                total_missing_slots += missing_count
+
+            summary_rows.append(
+                {
+                    "time": slot,
+                    "missing_count": missing_count,
+                    "status": "주의" if missing_count > 0 else "정상",
+                    "missing_zones": deficits,
+                }
+            )
+
+        return summary_rows, total_missing_slots, affected_times
+
     def get_staff_color(name):
         s_info = next((s for s in final_staff_configs if s['display_name'] == name), None)
         if not s_info:
@@ -688,6 +740,22 @@ if 'result_df' in st.session_state:
         table_html += "</tbody></table></div>"
         return table_html
 
+    def build_unassigned_zone_panel(summary_rows):
+        panel_html = "<div class='gap-board'>"
+        for row in summary_rows:
+            status_class = "alert" if row["missing_count"] > 0 else "ok"
+            missing_detail = ", ".join(row["missing_zones"]) if row["missing_zones"] else "모든 필수 구역 배정 완료"
+            panel_html += (
+                f"<div class='gap-card {status_class}'>"
+                f"<div class='gap-time'>{escape(row['time'])}</div>"
+                f"<div class='gap-status'>{escape(row['status'])}</div>"
+                f"<div class='gap-count'>미배정 {row['missing_count']}건</div>"
+                f"<div class='gap-detail'>{escape(missing_detail)}</div>"
+                "</div>"
+            )
+        panel_html += "</div>"
+        return panel_html
+
     table_styles = (
         "<style>"
         ".table-scroll{overflow:auto;background:#fff;border:1px solid #ddd;border-radius:12px;}"
@@ -696,9 +764,21 @@ if 'result_df' in st.session_state:
         ".rotation-table thead th{position:sticky;top:0;background:#f8f9fa;z-index:3;}"
         ".rotation-table .staff-name{position:sticky;left:0;background:#fff;font-weight:700;z-index:2;}"
         ".rotation-table thead th:first-child{left:0;z-index:4;}"
+        ".gap-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:12px 0 20px;}"
+        ".gap-card{border-radius:14px;padding:14px 16px;border:1px solid #d1d5db;background:#fff;box-shadow:0 6px 18px rgba(15,23,42,0.06);}"
+        ".gap-card.ok{background:linear-gradient(180deg,#f0fdf4 0%,#ffffff 100%);border-color:#bbf7d0;}"
+        ".gap-card.alert{background:linear-gradient(180deg,#fff7ed 0%,#ffffff 100%);border-color:#fdba74;}"
+        ".gap-time{font-size:0.95rem;font-weight:700;color:#111827;}"
+        ".gap-status{margin-top:6px;font-size:0.85rem;font-weight:700;}"
+        ".gap-card.ok .gap-status{color:#15803d;}"
+        ".gap-card.alert .gap-status{color:#c2410c;}"
+        ".gap-count{margin-top:6px;font-size:0.92rem;color:#111827;}"
+        ".gap-detail{margin-top:8px;font-size:0.84rem;line-height:1.45;color:#4b5563;}"
         "</style>"
     )
+    gap_summary_rows, total_missing_slots, affected_times = build_unassigned_zone_summary(edited_df)
     table_html = build_table(edited_df)
+    gap_panel_html = build_unassigned_zone_panel(gap_summary_rows)
     page_html = "<!doctype html><html lang='ko'><head><meta charset='utf-8'/><title>모바일 공유 현황판</title>"
     page_html += (
         "<style>"
@@ -709,6 +789,8 @@ if 'result_df' in st.session_state:
         f"{table_styles}"
     )
     page_html += "</head><body><div class='page-wrap'><h1>모바일 공유 현황판</h1>"
+    page_html += "<h2 style='margin:0;font-size:1.05rem;'>미배정 구역 체크</h2>"
+    page_html += gap_panel_html
     page_html += table_html
     page_html += "</div></body></html>"
 
@@ -728,6 +810,11 @@ if 'result_df' in st.session_state:
     </script>
     """
     st.markdown(table_styles, unsafe_allow_html=True)
+    st.markdown("### 🚨 미배정 구역 체크")
+    metric_col1, metric_col2 = st.columns(2)
+    metric_col1.metric("미배정 총 건수", total_missing_slots)
+    metric_col2.metric("영향 시간대", affected_times)
+    st.markdown(gap_panel_html, unsafe_allow_html=True)
     st.markdown(table_html, unsafe_allow_html=True)
     st.write("---")
     st.markdown("### 📸 모바일 공유용 현황판")
