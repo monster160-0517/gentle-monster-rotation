@@ -253,11 +253,16 @@ def get_initial_staff(data):
     return res
 
 def get_docent_schedule(staff_rows, extra_data):
-    schedule = {
+    primary_schedule = {
         staff["original_name"]: list(staff.get("docent_times", []))
         for staff in staff_rows
         if staff.get("docent_times")
     }
+
+    if primary_schedule:
+        return primary_schedule
+
+    schedule = {}
 
     if extra_data.empty:
         return schedule
@@ -290,7 +295,7 @@ with st.sidebar.expander("🎤 도슨트 탭", expanded=False):
         for docent_name, docent_times in sorted(docent_schedule.items()):
             st.write(f"{docent_name}: {', '.join(docent_times)}")
     else:
-        st.caption("직원DB 또는 도슨트 탭에 기록된 시간이 없습니다.")
+        st.caption("선택한 평일/주말 직원DB에 기록된 도슨트 시간이 없습니다.")
 
 pt_list = [s for s in raw_staff if s['type'] == '파트']
 
