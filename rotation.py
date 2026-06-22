@@ -956,8 +956,6 @@ if 'result_df' in st.session_state:
         f"{table_styles}"
     )
     page_html += "</head><body><div class='page-wrap'><h1>모바일 공유 현황판</h1>"
-    page_html += "<h2 style='margin:0;font-size:1.05rem;'>구역별 배치 인원 체크</h2>"
-    page_html += coverage_table_html
     page_html += table_html
     page_html += "</div></body></html>"
 
