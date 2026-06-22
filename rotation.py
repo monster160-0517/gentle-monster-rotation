@@ -392,6 +392,7 @@ def run_rotation():
     special_zone_history = {n: {} for n in working_names}
     w_zone_hours = {n: 0 for n in working_names}
     counter_assignment_total = {n: 0 for n in working_names}
+    counter_zone_assignment_total = {n: {} for n in working_names}
     counter_consecutive_hours = {n: 0 for n in working_names}
     MAX_1F = 3
     MAX_W_HOURS = 2
@@ -403,10 +404,6 @@ def run_rotation():
     def is_part_timer(name):
         staff = staff_lookup.get(name, {})
         return staff.get("type") == "파트"
-
-    def is_full_time(name):
-        staff = staff_lookup.get(name, {})
-        return staff.get("type") == "정직"
 
     def can_assign_zone(name, zone_name):
         special_group = get_special_zone_group(zone_name)
@@ -433,6 +430,10 @@ def run_rotation():
             w_zone_hours[name] += 1
         if is_counter_zone(zone_name):
             counter_assignment_total[name] += 1
+            zone_identity = get_zone_identity(zone_name)
+            counter_zone_assignment_total[name][zone_identity] = (
+                counter_zone_assignment_total[name].get(zone_identity, 0) + 1
+            )
             counter_consecutive_hours[name] += 1
         else:
             counter_consecutive_hours[name] = 0
@@ -441,23 +442,25 @@ def run_rotation():
         if not candidates:
             return None
 
-        prioritized = [n for n in candidates if is_full_time(n)]
-        working_candidates = prioritized or candidates
-        min_counter_total = min(counter_assignment_total[n] for n in working_candidates)
-        least_used_candidates = [
-            n for n in working_candidates
-            if counter_assignment_total[n] == min_counter_total
+        zone_identity = get_zone_identity(zone_name)
+        shuffled_candidates = list(candidates)
+        random.shuffle(shuffled_candidates)
+
+        def counter_score(name):
+            return (
+                counter_assignment_total[name],
+                counter_zone_assignment_total[name].get(zone_identity, 0),
+                counter_consecutive_hours[name],
+                1 if previous_assignments.get(name) == zone_name else 0,
+            )
+
+        best_score = min(counter_score(name) for name in shuffled_candidates)
+        best_candidates = [
+            name for name in shuffled_candidates
+            if counter_score(name) == best_score
         ]
-        min_counter_streak = min(counter_consecutive_hours[n] for n in least_used_candidates)
-        streak_balanced_candidates = [
-            n for n in least_used_candidates
-            if counter_consecutive_hours[n] == min_counter_streak
-        ]
-        return pick_best_staff(
-            zone_name,
-            streak_balanced_candidates,
-            previous_assignments,
-        )
+
+        return best_candidates[0] if best_candidates else None
 
     def update_floor_state(name, zone):
         floor = get_floor_bucket(zone)
