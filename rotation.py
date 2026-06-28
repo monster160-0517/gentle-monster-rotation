@@ -81,7 +81,20 @@ def get_clean_time(val):
     val = str(val).strip()
     if not val: return None
     nums = re.findall(r'\d+', val)
-    return f"{int(nums[0]):02d}:00" if nums else None
+    if not nums:
+        return None
+
+    hour = int(nums[0])
+    lower_val = val.lower()
+    is_pm = "오후" in val or "pm" in lower_val
+    is_am = "오전" in val or "am" in lower_val
+
+    if is_pm and hour < 12:
+        hour += 12
+    elif is_am and hour == 12:
+        hour = 0
+
+    return f"{hour:02d}:00"
 
 def get_hour_from_time(val, default=None):
     clean = get_clean_time(val)
