@@ -397,6 +397,21 @@ if st.session_state.get("config_signature") != config_signature:
     st.session_state.pop("result_df", None)
     st.session_state["config_signature"] = config_signature
 
+staff_config_by_name = {s["display_name"]: s for s in final_staff_configs}
+
+def enforce_priority_slots(df):
+    enforced = df.copy()
+    for staff_name, staff_config in staff_config_by_name.items():
+        if staff_name not in enforced.index:
+            continue
+        for docent_slot in staff_config.get("docent_times", []):
+            if docent_slot in enforced.columns:
+                enforced.at[staff_name, docent_slot] = "도슨트"
+        for meal_slot in staff_config.get("meals", []):
+            if meal_slot in enforced.columns:
+                enforced.at[staff_name, meal_slot] = "식사"
+    return enforced
+
 # --- 로테이션 엔진 ---
 def run_rotation():
     working_names = [s['display_name'] for s in final_staff_configs]
@@ -727,6 +742,7 @@ if 'result_df' in st.session_state:
     edited_df.index.name = "직원명"
     edited_df = edited_df.reindex(columns=display_df.columns)
     edited_df = edited_df.map(normalize_schedule_value)
+    edited_df = enforce_priority_slots(edited_df)
     csv_bytes = edited_df.to_csv(index=True).encode('utf-8')
     file_name = f"rotation_{selected_store}_{selected_day_type}_{date.today():%Y%m%d}"
 
