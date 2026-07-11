@@ -715,7 +715,7 @@ def run_rotation():
                 counter_consecutive_hours[n] = 0
     return schedule_df
 
-if st.sidebar.button("🚀 로테이션 자동 생성", width="stretch"):
+if st.sidebar.button("🚀 로테이션 자동 생성", use_container_width=True):
     st.session_state.result_df = run_rotation()
 
 # --- 화면 출력 ---
@@ -742,7 +742,7 @@ if 'result_df' in st.session_state:
     }
     edited_editor_df = st.data_editor(
         editor_df,
-        width="stretch",
+        use_container_width=True,
         height=450,
         column_config=column_settings,
         hide_index=True,
