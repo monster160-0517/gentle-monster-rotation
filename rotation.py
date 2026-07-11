@@ -1,10 +1,4 @@
 import streamlit as st
-
-st.set_page_config(page_title="Deployment health check", layout="centered")
-st.title("Deployment health check")
-st.success("Minimal rotation.py deployment is healthy.")
-st.stop()
-
 import streamlit.components.v1 as components
 import pandas as pd
 import random
@@ -26,6 +20,8 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("> HAUSNOWHERE SEOUL 플로어스케쥴 <")
+st.success("Checkpoint: imports and page setup completed.")
+st.stop()
 
 # 🔗 매장 및 시트 설정
 STORES = {
