@@ -20,8 +20,6 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("> HAUSNOWHERE SEOUL 플로어스케쥴 <")
-st.success("Checkpoint: imports and page setup completed.")
-st.stop()
 
 # 🔗 매장 및 시트 설정
 STORES = {
@@ -76,6 +74,11 @@ def load_sheet_data(sheet_id, gid=None, sheet_name=None):
 db_df = load_sheet_data(SHEET_ID, DB_SHEET_GID)
 to_df = load_sheet_data(SHEET_ID, TO_SHEET_GID)
 docent_df = load_sheet_data(SHEET_ID, sheet_name="도슨트")
+
+st.success(
+    f"Checkpoint: sheets loaded (DB {len(db_df)}, TO {len(to_df)}, docent {len(docent_df)})."
+)
+st.stop()
 
 if db_df.empty: st.stop()
 
