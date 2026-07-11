@@ -422,9 +422,6 @@ if st.session_state.get("config_signature") != config_signature:
 
 staff_config_by_name = {s["display_name"]: s for s in final_staff_configs}
 
-st.success(f"Checkpoint: staff setup completed ({len(final_staff_configs)} staff).")
-st.stop()
-
 def enforce_priority_slots(df):
     enforced = df.copy()
     for staff_name, staff_config in staff_config_by_name.items():
