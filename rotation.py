@@ -203,6 +203,11 @@ def normalize_schedule_value(value):
         return ""
     return text
 
+def map_dataframe_cells(df, func):
+    if hasattr(df, "map"):
+        return df.map(func)
+    return df.applymap(func)
+
 def is_enabled_flag(value):
     return any(x in str(value).lower() for x in ['o', 'y', '1', 'v', '예'])
 
@@ -723,7 +728,7 @@ if 'result_df' in st.session_state:
     res = st.session_state.result_df
     st.write(f"### 📅 [{selected_store} / {selected_day_type}] 로테이션")
     st.caption("수정은 아래 표에서 하고, 변경 내용은 모바일 공유용 현황판에 바로 반영됩니다.")
-    display_df = res.transpose().map(normalize_schedule_value)
+    display_df = map_dataframe_cells(res.transpose(), normalize_schedule_value)
     display_df.index.name = "직원명"
     editor_df = display_df.reset_index()
     editor_df = editor_df[["직원명"] + [c for c in editor_df.columns if c != "직원명"]]
@@ -754,7 +759,7 @@ if 'result_df' in st.session_state:
     edited_df = edited_df.set_index("직원명")
     edited_df.index.name = "직원명"
     edited_df = edited_df.reindex(columns=display_df.columns)
-    edited_df = edited_df.map(normalize_schedule_value)
+    edited_df = map_dataframe_cells(edited_df, normalize_schedule_value)
     edited_df = enforce_priority_slots(edited_df)
     csv_bytes = edited_df.to_csv(index=True).encode('utf-8')
     file_name = f"rotation_{selected_store}_{selected_day_type}_{date.today():%Y%m%d}"
