@@ -55,7 +55,7 @@ day_type_config = store_config["DAY_TYPES"][selected_day_type]
 DB_SHEET_GID = day_type_config["DB_GID"]
 TO_SHEET_GID = day_type_config["TO_GID"]
 
-@st.cache_data(ttl=1)
+@st.cache_data(ttl=300)
 def load_sheet_data(sheet_id, gid=None, sheet_name=None):
     if sheet_name:
         encoded_sheet_name = quote(sheet_name)
@@ -341,7 +341,12 @@ if st.session_state.get("pt_input_signature") != pt_input_signature:
         st.session_state[f"meal_{pt_name}"] = defaults["meal"]
     st.session_state["pt_input_signature"] = pt_input_signature
 
-selected_pt_names = st.sidebar.multiselect("⏱️ 출근 파트타이머 선택", [s['original_name'] for s in pt_list], default=[s['original_name'] for s in pt_list])
+selected_pt_names = st.sidebar.multiselect(
+    "⏱️ 출근 파트타이머 선택",
+    [s['original_name'] for s in pt_list],
+    default=[s['original_name'] for s in pt_list],
+    key="selected_pt_names",
+)
 
 final_staff_configs = []
 
@@ -352,7 +357,7 @@ for s in [x for x in raw_staff if x['type'] == '정직']:
         continue
     tag = "(A조)" if in_hr <= 10 else "(B조)"
     s['display_name'] = f"{s['original_name']}{tag}"
-    s['meals'] = list(set([m for m in [s['meal1'], s['meal2']] if m]))
+    s['meals'] = sorted({m for m in [s['meal1'], s['meal2']] if m})
     s['docent_times'] = docent_schedule.get(s['original_name'], []) if use_docent_schedule else []
     s['work_range'] = work_range
     s['in'] = f"{in_hr:02d}:00"
@@ -397,15 +402,15 @@ config_signature = json.dumps(
                 "type": s["type"],
                 "in": s.get("in"),
                 "out": s.get("out"),
-                "meals": s.get("meals", []),
-                "docent_times": s.get("docent_times", []),
+                "meals": sorted(s.get("meals", [])),
+                "docent_times": sorted(s.get("docent_times", [])),
                 "can_counter": s.get("can_counter", False),
                 "can_flexible": s.get("can_flexible", False),
             }
             for s in final_staff_configs
         ],
         "use_docent_schedule": use_docent_schedule,
-        "docent_schedule": docent_schedule,
+        "docent_schedule": {name: sorted(times) for name, times in docent_schedule.items()},
     },
     ensure_ascii=False,
     sort_keys=True,
