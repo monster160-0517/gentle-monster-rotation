@@ -75,11 +75,6 @@ db_df = load_sheet_data(SHEET_ID, DB_SHEET_GID)
 to_df = load_sheet_data(SHEET_ID, TO_SHEET_GID)
 docent_df = load_sheet_data(SHEET_ID, sheet_name="도슨트")
 
-st.success(
-    f"Checkpoint: sheets loaded (DB {len(db_df)}, TO {len(to_df)}, docent {len(docent_df)})."
-)
-st.stop()
-
 if db_df.empty: st.stop()
 
 def get_clean_time(val):
@@ -426,6 +421,9 @@ if st.session_state.get("config_signature") != config_signature:
     st.session_state["config_signature"] = config_signature
 
 staff_config_by_name = {s["display_name"]: s for s in final_staff_configs}
+
+st.success(f"Checkpoint: staff setup completed ({len(final_staff_configs)} staff).")
+st.stop()
 
 def enforce_priority_slots(df):
     enforced = df.copy()
