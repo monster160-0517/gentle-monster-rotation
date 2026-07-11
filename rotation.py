@@ -47,7 +47,7 @@ STORES = {
 }
 
 selected_store = st.sidebar.selectbox("🏠 담당 매장 선택", list(STORES.keys()))
-selected_day_type = st.sidebar.radio("📅 운영 구분", ["평일", "주말"], horizontal=True)
+selected_day_type = st.sidebar.radio("📅 운영 구분", ["평일", "주말"])
 
 store_config = STORES[selected_store]
 SHEET_ID = store_config["ID"]
@@ -720,7 +720,7 @@ def run_rotation():
                 counter_consecutive_hours[n] = 0
     return schedule_df
 
-if st.sidebar.button("🚀 로테이션 자동 생성", use_container_width=True):
+if st.sidebar.button("🚀 로테이션 자동 생성"):
     st.session_state.result_df = run_rotation()
 
 # --- 화면 출력 ---
@@ -737,30 +737,33 @@ if 'result_df' in st.session_state:
     zone_choices.update(str(val).strip() for val in display_df.values.flatten() if str(val).strip())
     zone_choices.update(["식사", "도슨트", "1층 유동", "2층 유동", "-", ""])
     zone_choices = sorted(zone_choices)
-    column_settings = {
-        col: (
-            st.column_config.SelectboxColumn(options=zone_choices)
-            if col != "직원명"
-            else st.column_config.TextColumn(label="직원명", disabled=True)
+    if hasattr(st, "data_editor") and hasattr(st, "column_config"):
+        column_settings = {
+            col: (
+                st.column_config.SelectboxColumn(options=zone_choices)
+                if col != "직원명"
+                else st.column_config.TextColumn(label="직원명", disabled=True)
+            )
+            for col in editor_df.columns
+        }
+        edited_editor_df = st.data_editor(
+            editor_df,
+            height=450,
+            column_config=column_settings,
+            hide_index=True,
+            num_rows="fixed",
+            key="rotation_editor",
         )
-        for col in editor_df.columns
-    }
-    edited_editor_df = st.data_editor(
-        editor_df,
-        use_container_width=True,
-        height=450,
-        column_config=column_settings,
-        hide_index=True,
-        num_rows="fixed",
-        key="rotation_editor",
-    )
-    edited_df = edited_editor_df.copy()
-    edited_df["직원명"] = edited_df["직원명"].astype(str).str.strip()
-    edited_df = edited_df.set_index("직원명")
-    edited_df.index.name = "직원명"
-    edited_df = edited_df.reindex(columns=display_df.columns)
-    edited_df = map_dataframe_cells(edited_df, normalize_schedule_value)
-    edited_df = enforce_priority_slots(edited_df)
+        edited_df = edited_editor_df.copy()
+        edited_df["직원명"] = edited_df["직원명"].astype(str).str.strip()
+        edited_df = edited_df.set_index("직원명")
+        edited_df.index.name = "직원명"
+        edited_df = edited_df.reindex(columns=display_df.columns)
+        edited_df = map_dataframe_cells(edited_df, normalize_schedule_value)
+        edited_df = enforce_priority_slots(edited_df)
+    else:
+        st.warning("현재 배포 환경에서는 표 직접 수정 기능이 제한됩니다.")
+        edited_df = display_df.copy()
     csv_bytes = edited_df.to_csv(index=True).encode('utf-8')
     file_name = f"rotation_{selected_store}_{selected_day_type}_{date.today():%Y%m%d}"
 
