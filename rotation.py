@@ -762,38 +762,44 @@ def run_rotation():
 if st.sidebar.button("🚀 로테이션 자동 생성"):
     st.session_state.result_df = run_rotation()
     for state_key in list(st.session_state):
-        if str(state_key).startswith("manual_assignment_"):
+        if str(state_key).startswith(("manual_assignment_", "manual_row_assignment_")):
             st.session_state.pop(state_key, None)
 
 # --- 화면 출력 ---
 if 'result_df' in st.session_state:
     res = st.session_state.result_df
     st.write(f"### 📅 [{selected_store} / {selected_day_type}] 로테이션")
-    st.caption("직원과 시간을 선택한 뒤 구역명을 직접 입력하면 컬러 현황표와 공유판에 바로 반영됩니다.")
+    st.caption("직원을 선택하면 해당 직원의 전체 시간대를 한 번에 수정할 수 있습니다. 적용 후 아래 컬러 현황표에 바로 반영됩니다.")
     display_df = map_dataframe_cells(res.transpose(), normalize_schedule_value)
     display_df.index.name = "직원명"
     zone_columns = [c for c in to_df.columns if c != to_df.columns[0]]
-    edit_col1, edit_col2 = st.columns(2)
-    edit_staff = edit_col1.selectbox(
+    edit_staff = st.selectbox(
         "수정할 직원",
         display_df.index.tolist(),
         key="manual_edit_staff",
     )
-    edit_slot = edit_col2.selectbox(
-        "수정할 시간",
-        display_df.columns.tolist(),
-        key="manual_edit_slot",
-    )
-    current_assignment = normalize_schedule_value(display_df.at[edit_staff, edit_slot])
-    assignment_key = f"manual_assignment_{edit_staff}_{edit_slot}"
-    new_assignment = st.text_input(
-        "배정 내용 직접 입력",
-        value=current_assignment,
-        key=assignment_key,
-        help="구역명을 입력한 그대로 반영합니다. 비우려면 - 를 입력하세요.",
-    )
-    if st.button("수정 적용", key="apply_manual_assignment", type="primary"):
-        res.at[edit_slot, edit_staff] = normalize_schedule_value(new_assignment)
+
+    with st.form("manual_row_editor", clear_on_submit=False):
+        edit_columns = st.columns(len(display_df.columns), gap="small")
+        row_assignments = {}
+        for column, edit_slot in zip(edit_columns, display_df.columns):
+            current_assignment = normalize_schedule_value(display_df.at[edit_staff, edit_slot])
+            assignment_key = f"manual_row_assignment_{edit_staff}_{edit_slot}"
+            row_assignments[edit_slot] = column.text_input(
+                str(edit_slot),
+                value=current_assignment,
+                key=assignment_key,
+                help="구역명을 입력한 그대로 반영합니다. 비우려면 - 를 입력하세요.",
+            )
+        apply_row_edits = st.form_submit_button(
+            "이 직원의 전체 시간대 수정 적용",
+            type="primary",
+            use_container_width=True,
+        )
+
+    if apply_row_edits:
+        for edit_slot, new_assignment in row_assignments.items():
+            res.at[edit_slot, edit_staff] = normalize_schedule_value(new_assignment)
         st.session_state.result_df = res
         st.rerun()
 
@@ -1046,6 +1052,10 @@ if 'result_df' in st.session_state:
     </script>
     """
     st.markdown(table_styles, unsafe_allow_html=True)
+    st.markdown("### 🎨 컬러 현황표")
+    st.caption("위 수정 화면의 변경 내용이 바로 반영되는 전체 미리보기입니다.")
+    st.markdown(table_html, unsafe_allow_html=True)
+    st.write("---")
     st.markdown("### 🚨 구역별 배치 인원 체크")
     metric_col1, metric_col2, metric_col3 = st.columns(3)
     metric_col1.metric("빈 구역 총수", total_empty_zones)
@@ -1053,10 +1063,6 @@ if 'result_df' in st.session_state:
     metric_col3.metric("영향 시간대", affected_times)
     st.caption("TO는 최대 배치 가능 인원입니다. `0명`은 빨간색, TO가 다 차지 않은 칸은 노란색으로 강조합니다.")
     st.markdown(coverage_table_html, unsafe_allow_html=True)
-    st.write("---")
-    st.markdown("### 🎨 컬러 현황표")
-    st.caption("위 수정용 표의 변경 내용이 바로 반영되는 읽기 전용 미리보기입니다.")
-    st.markdown(table_html, unsafe_allow_html=True)
     st.write("---")
     st.markdown("### 📸 모바일 공유용 현황판")
     components.html(widget_html, height=110)
