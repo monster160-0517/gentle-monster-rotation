@@ -4,10 +4,12 @@ import pandas as pd
 import random
 import re
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from html import escape
 from io import BytesIO
 from urllib.parse import quote
+from urllib.request import Request, urlopen
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 # 1. 페이지 설정
@@ -55,27 +57,59 @@ day_type_config = store_config["DAY_TYPES"][selected_day_type]
 DB_SHEET_GID = day_type_config["DB_GID"]
 TO_SHEET_GID = day_type_config["TO_GID"]
 
-@st.cache_data(ttl=300)
-def load_sheet_data(sheet_id, gid=None, sheet_name=None):
+def read_sheet_data(sheet_id, gid=None, sheet_name=None):
     if sheet_name:
         encoded_sheet_name = quote(sheet_name)
         url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={encoded_sheet_name}"
     else:
         url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
-    try:
-        df = pd.read_csv(url, skip_blank_lines=True, dtype=str)
-        df.columns = [str(c).strip() for c in df.columns]
-        df = df.fillna("").replace(r'\.0$', '', regex=True)
-        return df
-    except Exception as e:
-        st.error(f"시트 로딩 실패: {e}")
-        return pd.DataFrame()
+    # A stalled Google Sheets request must not leave the whole Cloud app
+    # unresponsive. Fetch with a hard timeout, then let pandas parse bytes.
+    request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urlopen(request, timeout=12) as response:
+        csv_data = response.read()
+    df = pd.read_csv(BytesIO(csv_data), skip_blank_lines=True, dtype=str)
+    df.columns = [str(c).strip() for c in df.columns]
+    return df.fillna("").replace(r'\.0$', '', regex=True)
 
-db_df = load_sheet_data(SHEET_ID, DB_SHEET_GID)
-to_df = load_sheet_data(SHEET_ID, TO_SHEET_GID)
-docent_df = load_sheet_data(SHEET_ID, sheet_name="도슨트")
 
-if db_df.empty: st.stop()
+@st.cache_data(ttl=300)
+def load_sheet_bundle(sheet_id, db_gid, to_gid):
+    sheet_specs = {
+        "직원DB": {"gid": db_gid},
+        "시간대별 TO": {"gid": to_gid},
+        "도슨트": {"sheet_name": "도슨트"},
+    }
+    results = {}
+    errors = []
+
+    with ThreadPoolExecutor(max_workers=len(sheet_specs)) as executor:
+        futures = {
+            name: executor.submit(read_sheet_data, sheet_id, **spec)
+            for name, spec in sheet_specs.items()
+        }
+        for name, future in futures.items():
+            try:
+                results[name] = future.result()
+            except Exception as exc:
+                results[name] = pd.DataFrame()
+                errors.append(f"{name}: {exc}")
+
+    return results["직원DB"], results["시간대별 TO"], results["도슨트"], errors
+
+
+db_df, to_df, docent_df, sheet_errors = load_sheet_bundle(
+    SHEET_ID, DB_SHEET_GID, TO_SHEET_GID
+)
+for sheet_error in sheet_errors:
+    st.error(f"시트 로딩 실패: {sheet_error}")
+
+if db_df.empty or to_df.empty:
+    st.warning("직원DB 또는 시간대별 TO를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.")
+    if st.button("시트 다시 불러오기"):
+        load_sheet_bundle.clear()
+        st.rerun()
+    st.stop()
 
 def get_clean_time(val):
     val = str(val).strip()
@@ -727,48 +761,43 @@ def run_rotation():
 
 if st.sidebar.button("🚀 로테이션 자동 생성"):
     st.session_state.result_df = run_rotation()
+    for state_key in list(st.session_state):
+        if str(state_key).startswith("manual_assignment_"):
+            st.session_state.pop(state_key, None)
 
 # --- 화면 출력 ---
 if 'result_df' in st.session_state:
     res = st.session_state.result_df
     st.write(f"### 📅 [{selected_store} / {selected_day_type}] 로테이션")
-    st.caption("수정은 아래 표에서 하고, 변경 내용은 모바일 공유용 현황판에 바로 반영됩니다.")
+    st.caption("직원과 시간을 선택한 뒤 구역명을 직접 입력하면 컬러 현황표와 공유판에 바로 반영됩니다.")
     display_df = map_dataframe_cells(res.transpose(), normalize_schedule_value)
     display_df.index.name = "직원명"
-    editor_df = display_df.reset_index()
-    editor_df = editor_df[["직원명"] + [c for c in editor_df.columns if c != "직원명"]]
     zone_columns = [c for c in to_df.columns if c != to_df.columns[0]]
-    zone_choices = set(zone_columns)
-    zone_choices.update(str(val).strip() for val in display_df.values.flatten() if str(val).strip())
-    zone_choices.update(["식사", "도슨트", "1층 유동", "2층 유동", "-", ""])
-    zone_choices = sorted(zone_choices)
-    if hasattr(st, "data_editor") and hasattr(st, "column_config"):
-        column_settings = {
-            col: (
-                st.column_config.SelectboxColumn(options=zone_choices)
-                if col != "직원명"
-                else st.column_config.TextColumn(label="직원명", disabled=True)
-            )
-            for col in editor_df.columns
-        }
-        edited_editor_df = st.data_editor(
-            editor_df,
-            height=450,
-            column_config=column_settings,
-            hide_index=True,
-            num_rows="fixed",
-            key="rotation_editor",
-        )
-        edited_df = edited_editor_df.copy()
-        edited_df["직원명"] = edited_df["직원명"].astype(str).str.strip()
-        edited_df = edited_df.set_index("직원명")
-        edited_df.index.name = "직원명"
-        edited_df = edited_df.reindex(columns=display_df.columns)
-        edited_df = map_dataframe_cells(edited_df, normalize_schedule_value)
-        edited_df = enforce_priority_slots(edited_df)
-    else:
-        st.warning("현재 배포 환경에서는 표 직접 수정 기능이 제한됩니다.")
-        edited_df = display_df.copy()
+    edit_col1, edit_col2 = st.columns(2)
+    edit_staff = edit_col1.selectbox(
+        "수정할 직원",
+        display_df.index.tolist(),
+        key="manual_edit_staff",
+    )
+    edit_slot = edit_col2.selectbox(
+        "수정할 시간",
+        display_df.columns.tolist(),
+        key="manual_edit_slot",
+    )
+    current_assignment = normalize_schedule_value(display_df.at[edit_staff, edit_slot])
+    assignment_key = f"manual_assignment_{edit_staff}_{edit_slot}"
+    new_assignment = st.text_input(
+        "배정 내용 직접 입력",
+        value=current_assignment,
+        key=assignment_key,
+        help="구역명을 입력한 그대로 반영합니다. 비우려면 - 를 입력하세요.",
+    )
+    if st.button("수정 적용", key="apply_manual_assignment", type="primary"):
+        res.at[edit_slot, edit_staff] = normalize_schedule_value(new_assignment)
+        st.session_state.result_df = res
+        st.rerun()
+
+    edited_df = enforce_priority_slots(display_df.copy())
     csv_bytes = edited_df.to_csv(index=True).encode('utf-8')
     file_name = f"rotation_{selected_store}_{selected_day_type}_{date.today():%Y%m%d}"
 
