@@ -1,3 +1,4 @@
 streamlit==1.55.0
 pandas==2.3.3
 openpyxl==3.1.5
+# Force a clean Community Cloud rebuild after removing the PyArrow editor crash.
