@@ -769,7 +769,7 @@ if st.sidebar.button("🚀 로테이션 자동 생성"):
 if 'result_df' in st.session_state:
     res = st.session_state.result_df
     st.write(f"### 📅 [{selected_store} / {selected_day_type}] 로테이션")
-    st.caption("직원을 선택하면 해당 직원의 전체 시간대를 한 번에 수정할 수 있습니다. 적용 후 아래 컬러 현황표에 바로 반영됩니다.")
+    st.caption("직원을 선택한 뒤 시간대별 드롭다운에서 구역을 변경할 수 있습니다. 적용 후 아래 컬러 현황표에 바로 반영됩니다.")
     display_df = map_dataframe_cells(res.transpose(), normalize_schedule_value)
     display_df.index.name = "직원명"
     zone_columns = [c for c in to_df.columns if c != to_df.columns[0]]
@@ -778,6 +778,7 @@ if 'result_df' in st.session_state:
         display_df.index.tolist(),
         key="manual_edit_staff",
     )
+    assignment_options = list(dict.fromkeys(["-"] + zone_columns + ["식사", "도슨트"]))
 
     with st.form("manual_row_editor", clear_on_submit=False):
         edit_columns = st.columns(len(display_df.columns), gap="small")
@@ -785,11 +786,15 @@ if 'result_df' in st.session_state:
         for column, edit_slot in zip(edit_columns, display_df.columns):
             current_assignment = normalize_schedule_value(display_df.at[edit_staff, edit_slot])
             assignment_key = f"manual_row_assignment_{edit_staff}_{edit_slot}"
-            row_assignments[edit_slot] = column.text_input(
+            slot_options = list(assignment_options)
+            if current_assignment not in slot_options:
+                slot_options.insert(0, current_assignment)
+            row_assignments[edit_slot] = column.selectbox(
                 str(edit_slot),
-                value=current_assignment,
+                slot_options,
+                index=slot_options.index(current_assignment),
                 key=assignment_key,
-                help="구역명을 입력한 그대로 반영합니다. 비우려면 - 를 입력하세요.",
+                help="시간대별 TO 시트의 구역과 식사, 도슨트, 미배정(-) 중에서 선택합니다.",
             )
         apply_row_edits = st.form_submit_button(
             "이 직원의 전체 시간대 수정 적용",
