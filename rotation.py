@@ -379,7 +379,9 @@ selected_pt_names = st.sidebar.multiselect(
     "⏱️ 출근 파트타이머 선택",
     [s['original_name'] for s in pt_list],
     default=[s['original_name'] for s in pt_list],
-    key="selected_pt_names",
+    # Keep each store/day selection independent. Reusing one key causes
+    # Streamlit to discard weekend names when switching from weekday data.
+    key=f"selected_pt_names_{selected_store}_{selected_day_type}",
 )
 
 final_staff_configs = []
